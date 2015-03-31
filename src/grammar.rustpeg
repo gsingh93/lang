@@ -1,0 +1,117 @@
+use super::{Program, FnDecl, Block, Stmt, Expr, BinOp};
+use Expr::{True, False, Num, BinExpr, EmptyExpr};
+use Stmt::{DeclStmt, ExprStmt, ReturnStmt, AssignStmt};
+use BinOp::{AddOp, SubOp, MulOp, DivOp};
+use std::i32;
+
+#[pub]
+program -> Program
+    = __ func_decls:func_decl* { Program { fns: func_decls } }
+
+func_decl -> FnDecl
+    = ty:ident name:ident lparen rparen lbrace b:block rbrace {
+        FnDecl { ty: ty, name: name, block: b }
+    }
+
+block -> Block
+    = s:stmt* { Block { stmts: s } }
+
+stmt -> Stmt
+    = decl_stmt / expr_stmt / return_stmt / assign_stmt
+
+decl_stmt -> Stmt
+    = ty:ident name:ident equals e:expr semicolon {
+        DeclStmt(ty, name, e)
+    }
+
+expr_stmt -> Stmt
+    = e:expr semicolon {
+        ExprStmt(e)
+    }
+
+return_stmt -> Stmt
+    = return e:expr semicolon {
+        ReturnStmt(e)
+    }
+
+assign_stmt -> Stmt
+    = name:ident equals e:expr semicolon {
+        AssignStmt(name, e)
+    }
+
+expr -> Expr
+    = t:term e:bin_expr_ {
+        match e {
+            EmptyExpr => t,
+            BinExpr(box EmptyExpr, op, e2) => BinExpr(Box::new(t), op, e2),
+            _ => panic!("Got unexpected expression {:?}", e)
+        }
+    }
+
+bin_expr_ -> Expr
+    = bin_expr / __ { EmptyExpr }
+
+term -> Expr
+    = true { True } / false { False } / num
+
+bin_expr -> Expr
+    = op:bin_op e2:expr __ {
+        BinExpr(Box::new(EmptyExpr), op, Box::new(e2))
+    }
+
+num -> Expr
+    = n:([0-9]+ {match_str.parse().unwrap()}) __ {
+        if n > i32::MAX {
+            panic!("Integer literal {} too large", n)
+        }
+        Num(n)
+    }
+
+bin_op -> BinOp
+    = '+' __ { AddOp } / '-' __ { SubOp } / '*' __ { MulOp } /  '/' __ { DivOp }
+
+
+ident -> String
+    = letter [a-zA-Z0-9_]* __ { match_str.to_string() }
+
+letter -> char
+    = [a-zA-Z] { match_str.char_at(0) }
+
+
+return = "return" __
+true = "true" __
+false = "false" __
+semicolon = ';' __
+lparen = '(' __
+rparen = ')' __
+lbrace = '{' __
+rbrace = '}' __
+equals = '=' __
+
+__ = (whitespace / eol / comment)*
+
+/* Modeled after ECMA-262, 5th ed., 7.4. */
+comment
+  = singleLineComment
+  / multiLineComment
+
+singleLineComment
+  = "//" (!eolChar .)*
+
+multiLineComment
+  = "/*" (!"*/" .)* "*/"
+
+/* Modeled after ECMA-262, 5th ed., 7.3. */
+eol
+  = "\n"
+  / "\r\n"
+  / "\r"
+  / "\u{2028}"
+  / "\u{2029}"
+
+eolChar
+  = [\n\r\u2028\u2029]
+
+/* Modeled after ECMA-262, 5th ed., 7.2. */
+whitespace
+  = [ \t\u{00A0}\u{FEFF}\u{1680}\u{180E}\u{2000}-\u{200A}\u{202F}\u{205F}\u{3000}] // \v\f removed
