@@ -5,3 +5,4 @@ authors = ["Gulshan Singh <gulshan@umich.edu>"]
 
 [dependencies]
 peg = "*"
+rustc-serialize = "*"

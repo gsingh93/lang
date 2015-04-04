@@ -1,6 +1,8 @@
 #![feature(plugin, collections, str_char, box_patterns)]
 #![plugin(peg_syntax_ext)]
 
+extern crate rustc_serialize;
+
 use lang::program;
 
 use std::env;
@@ -9,41 +11,61 @@ use std::io::Read;
 
 peg_file! lang("grammar.rustpeg");
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, RustcDecodable, RustcEncodable)]
 pub struct Program {
     fns: Vec<FnDecl>
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, RustcDecodable, RustcEncodable)]
 struct FnDecl {
-    ty: String,
+    ty: Type,
     name: String,
+    args: ArgList,
     block: Block
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, RustcDecodable, RustcEncodable)]
+struct ArgList {
+    args: Vec<Variable>
+}
+
+#[derive(Debug, Eq, PartialEq, RustcDecodable, RustcEncodable)]
+struct Variable {
+    ty: Type,
+    name: String
+}
+
+#[derive(Debug, Eq, PartialEq, RustcDecodable, RustcEncodable)]
+enum Type {
+    IntTy,
+    StringTy,
+    UserTy(String)
+}
+
+#[derive(Debug, Eq, PartialEq, RustcDecodable, RustcEncodable)]
 struct Block {
     stmts: Vec<Stmt>
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, RustcDecodable, RustcEncodable)]
 enum Stmt {
-    DeclStmt(String, String, Expr),
+    DeclStmt(Variable, Expr),
     ExprStmt(Expr),
     ReturnStmt(Expr),
     AssignStmt(String, Expr)
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, RustcDecodable, RustcEncodable)]
 enum Expr {
     True,
     False,
     Num(i32),
     BinExpr(Box<Expr>, BinOp, Box<Expr>),
-    EmptyExpr
+    EmptyExpr,
+    IdentExpr(String)
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, RustcDecodable, RustcEncodable)]
 enum BinOp {
     AddOp,
     SubOp,
@@ -82,8 +104,27 @@ fn main() {
     println!("{:?}", construct_ast(&filename));
 }
 
-#[test]
-fn test() {
-    let ast = construct_ast("tests/test.lang");
-    println!("{:?}", ast);
+#[cfg(test)]
+mod test {
+    extern crate rustc_serialize;
+
+    use lang::program;
+
+    use std::fs::File;
+    use std::io::Read;
+
+    use rustc_serialize::json;
+
+    #[test]
+    fn test() {
+        let mut code = String::new();
+        let mut f = File::open("tests/test.lang").unwrap();
+        f.read_to_string(&mut code).ok().expect("Unable to read code file");
+
+        let mut json = String::new();
+        let mut f = File::open("tests/test.json").unwrap();
+        f.read_to_string(&mut json).ok().expect("Unable to read JSON file");
+
+        assert_eq!(program(&code).unwrap(), json::decode(&json).unwrap());
+    }
 }

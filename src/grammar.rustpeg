@@ -1,6 +1,7 @@
-use super::{Program, FnDecl, Block, Stmt, Expr, BinOp};
-use Expr::{True, False, Num, BinExpr, EmptyExpr};
+use super::{Program, FnDecl, Block, Stmt, Expr, BinOp, Type, ArgList, Variable};
+use Expr::{True, False, Num, BinExpr, EmptyExpr, IdentExpr};
 use Stmt::{DeclStmt, ExprStmt, ReturnStmt, AssignStmt};
+use Type::{IntTy, StringTy, UserTy};
 use BinOp::{AddOp, SubOp, MulOp, DivOp};
 use std::i32;
 
@@ -9,19 +10,28 @@ program -> Program
     = __ func_decls:func_decl* { Program { fns: func_decls } }
 
 func_decl -> FnDecl
-    = ty:ident name:ident lparen rparen lbrace b:block rbrace {
-        FnDecl { ty: ty, name: name, block: b }
+    = ty:type name:ident lparen args:arg_list rparen b:block {
+        FnDecl { ty: ty, name: name, args: args, block: b }
     }
 
+type -> Type
+    = "int" __ { IntTy } / "string" __ { StringTy } / name:ident { UserTy(name) }
+
+variable -> Variable
+    = ty:type name:ident { Variable { ty: ty, name: name } }
+
+arg_list -> ArgList
+    = vars:variable ** comma { ArgList{ args: vars } }
+
 block -> Block
-    = s:stmt* { Block { stmts: s } }
+    = lbrace s:stmt* rbrace { Block { stmts: s } }
 
 stmt -> Stmt
     = decl_stmt / expr_stmt / return_stmt / assign_stmt
 
 decl_stmt -> Stmt
-    = ty:ident name:ident equals e:expr semicolon {
-        DeclStmt(ty, name, e)
+    = var:variable equals e:expr semicolon {
+        DeclStmt(var, e)
     }
 
 expr_stmt -> Stmt
@@ -52,7 +62,7 @@ bin_expr_ -> Expr
     = bin_expr / __ { EmptyExpr }
 
 term -> Expr
-    = true { True } / false { False } / num
+    = true { True } / false { False } / num / name:ident { IdentExpr(name) }
 
 bin_expr -> Expr
     = op:bin_op e2:expr __ {
@@ -72,7 +82,7 @@ bin_op -> BinOp
 
 
 ident -> String
-    = letter [a-zA-Z0-9_]* __ { match_str.to_string() }
+    = name:(letter [a-zA-Z0-9_]* { match_str.to_string() }) __ { name }
 
 letter -> char
     = [a-zA-Z] { match_str.char_at(0) }
@@ -87,10 +97,10 @@ rparen = ')' __
 lbrace = '{' __
 rbrace = '}' __
 equals = '=' __
+comma = ',' __
 
 __ = (whitespace / eol / comment)*
 
-/* Modeled after ECMA-262, 5th ed., 7.4. */
 comment
   = singleLineComment
   / multiLineComment
@@ -101,17 +111,13 @@ singleLineComment
 multiLineComment
   = "/*" (!"*/" .)* "*/"
 
-/* Modeled after ECMA-262, 5th ed., 7.3. */
 eol
   = "\n"
   / "\r\n"
   / "\r"
-  / "\u{2028}"
-  / "\u{2029}"
 
 eolChar
-  = [\n\r\u2028\u2029]
+  = [\n\r]
 
-/* Modeled after ECMA-262, 5th ed., 7.2. */
 whitespace
-  = [ \t\u{00A0}\u{FEFF}\u{1680}\u{180E}\u{2000}-\u{200A}\u{202F}\u{205F}\u{3000}] // \v\f removed
+  = [ \t]
