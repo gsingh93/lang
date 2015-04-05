@@ -1,5 +1,5 @@
 use super::{Program, FnDecl, Block, Stmt, Expr, BinOp, Type, ArgList, Variable};
-use Expr::{True, False, Num, BinExpr, EmptyExpr, IdentExpr};
+use Expr::{True, False, Num, BinExpr, EmptyExpr, IdentExpr, FuncCallExpr};
 use Stmt::{DeclStmt, ExprStmt, ReturnStmt, AssignStmt};
 use Type::{IntTy, StringTy, UserTy};
 use BinOp::{AddOp, SubOp, MulOp, DivOp};
@@ -62,7 +62,20 @@ bin_expr_ -> Expr
     = bin_expr / __ { EmptyExpr }
 
 term -> Expr
-    = true { True } / false { False } / num / name:ident { IdentExpr(name) }
+    = true { True } / false { False } / num / name:ident e:func_or_ident_expr {
+        match e {
+            EmptyExpr => IdentExpr(name),
+            FuncCallExpr(_, params) => FuncCallExpr(name, params),
+            _ => panic!("Got unexpected expression {:?}", e)
+        }
+    }
+
+func_or_ident_expr -> Expr
+    = lparen params:param_list rparen { FuncCallExpr("".to_string(), params) }
+    / __ { EmptyExpr }
+
+param_list -> Vec<Expr>
+    = expr ** comma
 
 bin_expr -> Expr
     = op:bin_op e2:expr __ {

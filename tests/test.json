@@ -43,6 +43,15 @@
                     "fields": ["a"]
                 }]
             }, {
+                "variant": "AssignStmt",
+                "fields": ["b", {
+                    "variant": "FuncCallExpr",
+                    "fields": ["bar", [{
+                        "variant": "IdentExpr",
+                        "fields": ["b"]
+                    }]]
+                }]
+            }, {
                 "variant": "DeclStmt",
                 "fields": [{
                     "ty": "IntTy",
@@ -89,6 +98,30 @@
                 "fields": [{
                     "variant": "Num",
                     "fields": [5]
+                }]
+            }]
+        }
+    }, {
+        "ty": "IntTy",
+        "name": "bar",
+        "args": {
+            "args": [{
+                "ty": "IntTy",
+                "name": "var"
+            }]
+        },
+        "block": {
+            "stmts": [{
+                "variant": "ReturnStmt",
+                "fields": [{
+                    "variant": "BinExpr",
+                    "fields": [{
+                        "variant": "IdentExpr",
+                        "fields": ["var"]
+                    }, "MulOp", {
+                        "variant": "Num",
+                        "fields": [2]
+                    }]
                 }]
             }]
         }

@@ -62,7 +62,8 @@ enum Expr {
     Num(i32),
     BinExpr(Box<Expr>, BinOp, Box<Expr>),
     EmptyExpr,
-    IdentExpr(String)
+    IdentExpr(String),
+    FuncCallExpr(String, Vec<Expr>)
 }
 
 #[derive(Debug, Eq, PartialEq, RustcDecodable, RustcEncodable)]
