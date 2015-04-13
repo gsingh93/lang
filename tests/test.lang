@@ -5,6 +5,19 @@ int foo(int x, string y, myclass z) {
     b = bar(b);
     int c = 1 + a;
     int d = a + c + 1 - 3;
+
+    int e = 0;
+    if d == 3 {
+        e = 1;
+    } else {
+        e = 2;
+    }
+
+    int f = 0;
+    while f < 5 {
+        f = f + 1;
+    }
+
     return 5;
 }
 

@@ -1,8 +1,8 @@
 use super::{Program, FnDecl, Block, Stmt, Expr, BinOp, Type, ArgList, Variable};
 use Expr::{True, False, Num, BinExpr, EmptyExpr, IdentExpr, FuncCallExpr};
-use Stmt::{DeclStmt, ExprStmt, ReturnStmt, AssignStmt};
+use Stmt::{DeclStmt, ExprStmt, ReturnStmt, AssignStmt, IfStmt, WhileStmt};
 use Type::{IntTy, StringTy, UserTy};
-use BinOp::{AddOp, SubOp, MulOp, DivOp};
+use BinOp::{AddOp, SubOp, MulOp, DivOp, LessOp, GreaterOp, EqualsOp};
 use std::i32;
 
 #[pub]
@@ -27,7 +27,7 @@ block -> Block
     = lbrace s:stmt* rbrace { Block { stmts: s } }
 
 stmt -> Stmt
-    = decl_stmt / expr_stmt / return_stmt / assign_stmt
+    = return_stmt / assign_stmt / if_stmt / while_stmt / decl_stmt / expr_stmt
 
 decl_stmt -> Stmt
     = var:variable equals e:expr semicolon {
@@ -40,7 +40,7 @@ expr_stmt -> Stmt
     }
 
 return_stmt -> Stmt
-    = return e:expr semicolon {
+    = return_kw e:expr semicolon {
         ReturnStmt(e)
     }
 
@@ -49,8 +49,15 @@ assign_stmt -> Stmt
         AssignStmt(name, e)
     }
 
+if_stmt -> Stmt
+    = if_kw e:expr b1:block b2:(else_kw b:block { b })? { IfStmt(e, b1, b2)}
+
+while_stmt -> Stmt
+    = while_kw e:expr b:block { WhileStmt(e, b) }
+
 expr -> Expr
     = t:term e:bin_expr_ {
+        println!("got term {:?}", t);
         match e {
             EmptyExpr => t,
             BinExpr(box EmptyExpr, op, e2) => BinExpr(Box::new(t), op, e2),
@@ -61,8 +68,13 @@ expr -> Expr
 bin_expr_ -> Expr
     = bin_expr / __ { EmptyExpr }
 
+bin_expr -> Expr
+    = op:bin_op e2:expr __ {
+        BinExpr(Box::new(EmptyExpr), op, Box::new(e2))
+    }
+
 term -> Expr
-    = true { True } / false { False } / num / name:ident e:func_or_ident_expr {
+    = true_kw { True } / false_kw { False } / num / name:ident e:func_or_ident_expr {
         match e {
             EmptyExpr => IdentExpr(name),
             FuncCallExpr(_, params) => FuncCallExpr(name, params),
@@ -77,11 +89,6 @@ func_or_ident_expr -> Expr
 param_list -> Vec<Expr>
     = expr ** comma
 
-bin_expr -> Expr
-    = op:bin_op e2:expr __ {
-        BinExpr(Box::new(EmptyExpr), op, Box::new(e2))
-    }
-
 num -> Expr
     = n:([0-9]+ {match_str.parse().unwrap()}) __ {
         if n > i32::MAX {
@@ -91,19 +98,34 @@ num -> Expr
     }
 
 bin_op -> BinOp
-    = '+' __ { AddOp } / '-' __ { SubOp } / '*' __ { MulOp } /  '/' __ { DivOp }
+    = add_tok { AddOp } / sub_tok { SubOp } / mul_tok { MulOp } / div_tok { DivOp }
+    / lt_tok { LessOp } / gt_tok { GreaterOp } / eq_tok { EqualsOp }
 
+
+ident_char -> char
+    = [a-zA-Z0-9_] { match_str.char_at(0) }
 
 ident -> String
-    = name:(letter [a-zA-Z0-9_]* { match_str.to_string() }) __ { name }
+    = name:(letter ident_char* { match_str.to_string() }) __ { name }
 
 letter -> char
     = [a-zA-Z] { match_str.char_at(0) }
 
+add_tok = '+' __
+sub_tok = '-' __
+mul_tok = '*' __
+div_tok = '/' __
+lt_tok = '<' __
+gt_tok = '>' __
+eq_tok = '==' __
+return_kw = "return" kw__
+true_kw = "true" kw__
+false_kw = "false" kw__
+if_kw = "if" kw__
+else_kw = "else" kw__
+while_kw = "while" kw__
+kw__ = (!ident_char) __
 
-return = "return" __
-true = "true" __
-false = "false" __
 semicolon = ';' __
 lparen = '(' __
 rparen = ')' __
