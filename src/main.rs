@@ -1,4 +1,4 @@
-#![feature(plugin, collections, str_char, box_patterns)]
+#![feature(plugin, str_char, box_patterns)]
 #![plugin(peg_syntax_ext)]
 
 extern crate rustc_serialize;
