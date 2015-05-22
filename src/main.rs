@@ -8,7 +8,7 @@ extern crate libc;
 mod llvm;
 
 use lang::program;
-use llvm::{ValueRef, TypeRef, Context};
+use llvm::{ValueRef, TypeRef, Ctxt, FileType, CodeGenModel, RelocMode, CodeGenOptLevel};
 use BinOp::{AddOp, SubOp, MulOp, DivOp};
 
 use std::env;
@@ -23,9 +23,9 @@ pub struct Program {
 }
 
 impl Program {
-    fn gen(&self, context: &mut Context) {
+    fn gen(&self, ctxt: &mut Ctxt) {
         for func in self.fns.iter() {
-            func.gen(context);
+            func.gen(ctxt);
         }
     }
 }
@@ -39,24 +39,26 @@ struct FnDecl {
 }
 
 impl FnDecl {
-    fn gen(&self, context: &mut Context) {
-        let ret_ty = self.ty.gen_type(context);
-        let param_types = self.args.gen_types(context);
+    fn gen(&self, ctxt: &mut Ctxt) {
+        assert_eq!(ctxt.named_values.len(), 0);
+
+        let ret_ty = self.ty.gen_type(ctxt);
+        let param_types = self.args.gen_types(ctxt);
         let func_ty = llvm::function_type(ret_ty, param_types, false);
-        let func = llvm::add_function(context.module, func_ty, &self.name);
+        let func = ctxt.module.add_function(func_ty, &self.name);
 
         let mut param = llvm::get_first_param(func);
         for var in self.args.args.iter() {
-            context.named_values.insert(var.name.clone(), param);
+            ctxt.named_values.insert(var.name.clone(), param);
             llvm::set_value_name(param, &var.name);
             param = llvm::get_next_param(param);
         }
 
-        let basic_block = llvm::append_basic_block_in_context(context.context, func, "entry");
-        llvm::position_builder_at_end(context.builder, basic_block);
-        self.block.gen(context);
+        let basic_block = ctxt.context.append_basic_block(func, "entry");
+        ctxt.builder.position_at_end(basic_block);
+        self.block.gen(ctxt);
 
-        context.named_values.clear();
+        ctxt.named_values.clear();
     }
 }
 
@@ -66,10 +68,10 @@ struct ArgList {
 }
 
 impl ArgList {
-    fn gen_types(&self, context: &mut Context) -> Vec<TypeRef> {
+    fn gen_types(&self, ctxt: &mut Ctxt) -> Vec<TypeRef> {
         let mut types = Vec::with_capacity(self.args.len());
         for var in self.args.iter() {
-            types.push(var.ty.gen_type(context));
+            types.push(var.ty.gen_type(ctxt));
         }
         types
     }
@@ -89,10 +91,10 @@ enum Type {
 }
 
 impl Type {
-    fn gen_type(&self, context: &mut Context) -> TypeRef {
+    fn gen_type(&self, ctxt: &mut Ctxt) -> TypeRef {
         match self {
-            &Type::IntTy => llvm::int32_type_in_context(context.context),
-            &Type::StringTy => llvm::pointer_type(llvm::int8_type_in_context(context.context), 0),
+            &Type::IntTy => ctxt.context.int32_type(),
+            &Type::StringTy => llvm::pointer_type(ctxt.context.int8_type(), 0),
             _ => unimplemented!()
         }
     }
@@ -104,9 +106,9 @@ struct Block {
 }
 
 impl Block {
-    fn gen(&self, context: &mut Context) {
+    fn gen(&self, ctxt: &mut Ctxt) {
         for stmt in self.stmts.iter() {
-            stmt.gen(context);
+            stmt.gen(ctxt);
         }
     }
 }
@@ -122,18 +124,24 @@ enum Stmt {
 }
 
 impl Stmt {
-    fn gen(&self, context: &mut Context) {
+    fn gen(&self, ctxt: &mut Ctxt) {
         match self {
             &Stmt::DeclStmt(ref var, ref e) => {
-                let ptr = llvm::build_alloca(context.builder, var.ty.gen_type(context), &var.name);
-                context.named_values.insert(var.name.clone(), ptr);
-                llvm::build_store(context.builder, e.gen(context), ptr)
+                let ty = var.ty.gen_type(ctxt);
+                let ptr = ctxt.builder.build_alloca(ty, &var.name);
+                ctxt.named_values.insert(var.name.clone(), ptr);
+                let expr_res = e.gen(ctxt);
+                ctxt.builder.build_store(expr_res, ptr)
             }
-            &Stmt::ExprStmt(ref e) => e.gen(context),
-            &Stmt::ReturnStmt(ref e) => llvm::build_ret(context.builder, e.gen(context)),
+            &Stmt::ExprStmt(ref e) => e.gen(ctxt),
+            &Stmt::ReturnStmt(ref e) => {
+                let expr_res = e.gen(ctxt);
+                ctxt.builder.build_ret(expr_res)
+            }
             &Stmt::AssignStmt(ref var_name, ref e) => {
-                let val = context.named_values.get(var_name).expect("Variable not found").clone();
-                llvm::build_store(context.builder, e.gen(context), val)
+                let val = ctxt.named_values.get(var_name).expect("Variable not found").clone();
+                let expr_res = e.gen(ctxt);
+                ctxt.builder.build_store(expr_res, val)
             }
         };
     }
@@ -151,32 +159,32 @@ enum Expr {
 }
 
 impl Expr {
-    fn gen(&self, context: &mut Context) -> ValueRef {
+    fn gen(&self, ctxt: &mut Ctxt) -> ValueRef {
         match self {
-            &Expr::True => llvm::const_bool(context.context, true),
-            &Expr::False => llvm::const_bool(context.context, false),
+            &Expr::True => ctxt.context.const_bool(true),
+            &Expr::False => ctxt.context.const_bool(false),
             &Expr::Num(ref n) => {
-                let ty = llvm::int32_type_in_context(context.context);
+                let ty = ctxt.context.int32_type();
                 llvm::const_int(ty, *n as u64, false)
             }
             &Expr::BinExpr(ref l, op, ref r) => {
-                let left = l.gen(context);
-                let right = r.gen(context);
+                let left = l.gen(ctxt);
+                let right = r.gen(ctxt);
                 match op {
-                    AddOp => llvm::build_add(context.builder, left, right, "addtmp"),
-                    SubOp => llvm::build_sub(context.builder, left, right, "subtmp"),
-                    MulOp => llvm::build_mul(context.builder, left, right, "multmp"),
+                    AddOp => ctxt.builder.build_add(left, right, "addtmp"),
+                    SubOp => ctxt.builder.build_sub(left, right, "subtmp"),
+                    MulOp => ctxt.builder.build_mul(left, right, "multmp"),
                     DivOp => unimplemented!()
                 }
             }
             &Expr::IdentExpr(ref name) => {
-                let ptr = context.named_values.get(name).expect("Variable not found").clone();
-                llvm::build_load(context.builder, ptr, name)
+                let ptr = ctxt.named_values.get(name).expect("Variable not found").clone();
+                ctxt.builder.build_load(ptr, name)
             },
             &Expr::FuncCallExpr(ref func_name, ref arg_exprs) => {
-                let func = llvm::get_named_function(context.module, func_name);
-                let args: Vec<_> = arg_exprs.iter().map(|e| e.gen(context)).collect();
-                llvm::build_call(context.builder, func, args, func_name)
+                let func = ctxt.module.get_named_function(func_name);
+                let args: Vec<_> = arg_exprs.iter().map(|e| e.gen(ctxt)).collect();
+                ctxt.builder.build_call(func, args, func_name)
             }
             _ => unimplemented!()
         }
@@ -218,14 +226,30 @@ fn construct_ast(filename: &str) -> Program {
 }
 
 fn main() {
+    use std::ffi::CStr;
     let filename = match get_filename() {
         Ok(f) => f,
         Err(name) => { println!("Usage: {} filename", name); return }
     };
     let ast = construct_ast(&filename);
-    let mut context = Context::new("main");
+    let mut context = Ctxt::new("main");
     ast.gen(&mut context);
-    llvm::dump_module(context.module);
+    unsafe {
+        rustc::llvm::LLVMInitializeX86TargetInfo();
+        rustc::llvm::LLVMInitializeX86Target();
+        rustc::llvm::LLVMInitializeX86TargetMC();
+    }
+
+    let target = llvm::rust_create_target_machine("x86_64-unknown-linux-gnu", "native", "",
+                                                  CodeGenModel::CodeModelDefault,
+                                                  RelocMode::RelocDefault,
+                                                  CodeGenOptLevel::CodeGenLevelNone, false, false,
+                                                  false, false, false, false);
+
+    let pm = llvm::create_pass_manager();
+    llvm::rust_write_output_file(target, pm, context.module, "foo.out",
+                                 FileType::AssemblyFileType);
+    //context.module.dump();
 }
 
 #[cfg(test)]
