@@ -1,14 +1,16 @@
-#![feature(plugin, str_char, box_patterns, rustc_private, libc)]
+#![feature(plugin, str_char, box_patterns)]
 #![plugin(peg_syntax_ext)]
 
-extern crate rustc;
+extern crate llvm_sys;
+extern crate getopts;
 extern crate rustc_serialize;
-extern crate libc;
 
 mod llvm;
 
+use llvm::Ctxt;
 use lang::program;
-use llvm::{ValueRef, TypeRef, Ctxt, FileType, CodeGenModel, RelocMode, CodeGenOptLevel};
+use llvm_sys::prelude::*;
+use llvm_sys::target_machine::*;
 use BinOp::{AddOp, SubOp, MulOp, DivOp};
 
 use std::env;
@@ -68,7 +70,7 @@ struct ArgList {
 }
 
 impl ArgList {
-    fn gen_types(&self, ctxt: &mut Ctxt) -> Vec<TypeRef> {
+    fn gen_types(&self, ctxt: &mut Ctxt) -> Vec<LLVMTypeRef> {
         let mut types = Vec::with_capacity(self.args.len());
         for var in self.args.iter() {
             types.push(var.ty.gen_type(ctxt));
@@ -91,7 +93,7 @@ enum Type {
 }
 
 impl Type {
-    fn gen_type(&self, ctxt: &mut Ctxt) -> TypeRef {
+    fn gen_type(&self, ctxt: &mut Ctxt) -> LLVMTypeRef {
         match self {
             &Type::IntTy => ctxt.context.int32_type(),
             &Type::StringTy => llvm::pointer_type(ctxt.context.int8_type(), 0),
@@ -159,7 +161,7 @@ enum Expr {
 }
 
 impl Expr {
-    fn gen(&self, ctxt: &mut Ctxt) -> ValueRef {
+    fn gen(&self, ctxt: &mut Ctxt) -> LLVMValueRef {
         match self {
             &Expr::True => ctxt.context.const_bool(true),
             &Expr::False => ctxt.context.const_bool(false),
@@ -226,7 +228,6 @@ fn construct_ast(filename: &str) -> Program {
 }
 
 fn main() {
-    use std::ffi::CStr;
     let filename = match get_filename() {
         Ok(f) => f,
         Err(name) => { println!("Usage: {} filename", name); return }
@@ -234,22 +235,26 @@ fn main() {
     let ast = construct_ast(&filename);
     let mut context = Ctxt::new("main");
     ast.gen(&mut context);
-    unsafe {
-        rustc::llvm::LLVMInitializeX86TargetInfo();
-        rustc::llvm::LLVMInitializeX86Target();
-        rustc::llvm::LLVMInitializeX86TargetMC();
+
+    if true {
+        if true {
+            llvm::print_module_to_file(&context.module, "foo.ll").unwrap();
+        } else {
+            println!("{}", llvm::print_module_to_string(&context.module));
+        }
+    } else if true {
+        llvm::initialize_native_target();
+        llvm::initialize_native_asm_printer();
+
+        let target = llvm::get_target_from_name("x86-64");
+        let triple = llvm::get_default_target_triple();
+        let tm = llvm::create_target_machine(target, triple, "", "",
+                                             LLVMCodeGenOptLevel::LLVMCodeGenLevelNone,
+                                             LLVMRelocMode::LLVMRelocDefault,
+                                             LLVMCodeModel::LLVMCodeModelDefault);
+        let file_type = LLVMCodeGenFileType::LLVMAssemblyFile;
+        llvm::target_machine_emit_to_file(tm, &mut context.module, "foo.out", file_type).unwrap()
     }
-
-    let target = llvm::rust_create_target_machine("x86_64-unknown-linux-gnu", "native", "",
-                                                  CodeGenModel::CodeModelDefault,
-                                                  RelocMode::RelocDefault,
-                                                  CodeGenOptLevel::CodeGenLevelNone, false, false,
-                                                  false, false, false, false);
-
-    let pm = llvm::create_pass_manager();
-    llvm::rust_write_output_file(target, pm, context.module, "foo.out",
-                                 FileType::AssemblyFileType);
-    //context.module.dump();
 }
 
 #[cfg(test)]

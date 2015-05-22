@@ -6,3 +6,5 @@ authors = ["Gulshan Singh <gulshan@umich.edu>"]
 [dependencies]
 peg = "*"
 rustc-serialize = "*"
+llvm_sys = "*"
+getopts = "*"

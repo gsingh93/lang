@@ -1,15 +1,16 @@
 use std::collections::HashMap;
-use std::ffi::CString;
+use std::ffi::{CString, CStr};
 
-use rustc::llvm::{self, ContextRef, ModuleRef, BuilderRef, BasicBlockRef, PassManagerRef,
-                  TargetMachineRef};
-
+use llvm_sys::prelude::*;
+use llvm_sys::target_machine::*;
+use llvm_sys::target::*;
+use llvm_sys::core as llvm;
 
 pub struct Ctxt {
     pub context: Context,
     pub module: Module,
     pub builder: Builder,
-    pub named_values: HashMap<String, ValueRef>
+    pub named_values: HashMap<String, LLVMValueRef>
 }
 
 impl Ctxt {
@@ -26,21 +27,16 @@ impl Ctxt {
     }
 }
 
-fn str_to_c_str(s: &str) -> *const i8 {
-    let c_str = match CString::new(s) {
-        Ok(c_str) => c_str,
-        Err(e) => panic!("Error converting string '{}' to C string, null byte at position {}",
-                         s, e.nul_position())
-    };
-    c_str.as_ptr()
+macro_rules! c_str_to_str {
+    ($s:expr) => {
+        ::std::str::from_utf8(CStr::from_ptr($s).to_bytes()).unwrap()
+    }
 }
 
 // LLVM Wrappers
 
-pub use rustc::llvm::{ValueRef, TypeRef, FileType, CodeGenModel, RelocMode, CodeGenOptLevel};
-
 pub struct Context {
-    pub context: ContextRef
+    pub context: LLVMContextRef
 }
 
 impl Context {
@@ -59,53 +55,53 @@ impl Context {
     }
 
     pub fn module_create_with_name(&self, name: &str) -> Module {
-        let c_name = str_to_c_str(name);
+        let c_name = CString::new(name).unwrap();
         let module = unsafe {
-            llvm::LLVMModuleCreateWithNameInContext(c_name, self.context)
+            llvm::LLVMModuleCreateWithNameInContext(c_name.as_ptr(), self.context)
         };
         Module { module: module }
     }
 
-    pub fn int32_type(&self) -> TypeRef {
+    pub fn int32_type(&self) -> LLVMTypeRef {
         unsafe {
             llvm::LLVMInt32TypeInContext(self.context)
         }
     }
 
-    pub fn int16_type(&self) -> TypeRef {
+    pub fn int16_type(&self) -> LLVMTypeRef {
         unsafe {
             llvm::LLVMInt16TypeInContext(self.context)
         }
     }
 
-    pub fn int8_type(&self) -> TypeRef {
+    pub fn int8_type(&self) -> LLVMTypeRef {
         unsafe {
             llvm::LLVMInt8TypeInContext(self.context)
         }
     }
 
-    pub fn int1_type(&self) -> TypeRef {
+    pub fn int1_type(&self) -> LLVMTypeRef {
         unsafe {
             llvm::LLVMInt1TypeInContext(self.context)
         }
     }
 
-    pub fn const_bool(&self, val: bool) -> ValueRef {
+    pub fn const_bool(&self, val: bool) -> LLVMValueRef {
         let ty = self.int1_type();
         const_int(ty, val as u64, false)
     }
 
-    pub fn append_basic_block(&self, func: ValueRef, name: &str) -> BasicBlockRef {
-        let c_name = str_to_c_str(name);
+    pub fn append_basic_block(&self, func: LLVMValueRef, name: &str) -> LLVMBasicBlockRef {
+        let c_name = CString::new(name).unwrap();
         unsafe {
-            llvm::LLVMAppendBasicBlockInContext(self.context, func, c_name)
+            llvm::LLVMAppendBasicBlockInContext(self.context, func, c_name.as_ptr())
         }
     }
 }
 
-pub fn const_int(ty: TypeRef, val: u64, signed: bool) -> ValueRef {
+pub fn const_int(ty: LLVMTypeRef, val: u64, signed: bool) -> LLVMValueRef {
     unsafe {
-        llvm::LLVMConstInt(ty, val, signed as u32)
+        llvm::LLVMConstInt(ty, val, signed as i32)
     }
 }
 
@@ -118,7 +114,7 @@ impl Drop for Context {
 }
 
 pub struct Module {
-    pub module: ModuleRef
+    pub module: LLVMModuleRef
 }
 
 impl Module {
@@ -128,17 +124,17 @@ impl Module {
         }
     }
 
-    pub fn add_function(&self, func_ty: TypeRef, name: &str) -> ValueRef {
-        let c_name = str_to_c_str(name);
+    pub fn add_function(&mut self, func_ty: LLVMTypeRef, name: &str) -> LLVMValueRef {
+        let c_name = CString::new(name).unwrap();
         unsafe {
-            llvm::LLVMAddFunction(self.module, c_name, func_ty)
+            llvm::LLVMAddFunction(self.module, c_name.as_ptr(), func_ty)
         }
     }
 
-    pub fn get_named_function(&self, name: &str) -> ValueRef {
-        let c_name = str_to_c_str(name);
+    pub fn get_named_function(&mut self, name: &str) -> LLVMValueRef {
+        let c_name = CString::new(name).unwrap();
         unsafe {
-            llvm::LLVMGetNamedFunction(self.module, c_name)
+            llvm::LLVMGetNamedFunction(self.module, c_name.as_ptr())
         }
     }
 }
@@ -146,74 +142,75 @@ impl Module {
 impl Drop for Module {
     fn drop(&mut self) {
         unsafe {
-            llvm::LLVMDisposeModule(self.module);
+            //TODO: llvm::LLVMDisposeModule(self.module);
         }
     }
 }
 
 pub struct Builder {
-    pub builder: BuilderRef
+    pub builder: LLVMBuilderRef
 }
 
 impl Builder {
-    pub fn position_at_end(&self, basic_block: BasicBlockRef) {
+    pub fn position_at_end(&mut self, basic_block: LLVMBasicBlockRef) {
         unsafe {
             llvm::LLVMPositionBuilderAtEnd(self.builder, basic_block);
         }
     }
 
-    pub fn build_ret(&self, ret_val: ValueRef) -> ValueRef {
+    pub fn build_ret(&mut self, ret_val: LLVMValueRef) -> LLVMValueRef {
         unsafe {
             llvm::LLVMBuildRet(self.builder, ret_val)
         }
     }
 
-    pub fn build_alloca(&self, ty: TypeRef, name: &str) -> ValueRef {
-        let c_name = str_to_c_str(name);
+    pub fn build_alloca(&mut self, ty: LLVMTypeRef, name: &str) -> LLVMValueRef {
+        let c_name = CString::new(name).unwrap();
         unsafe {
-            llvm::LLVMBuildAlloca(self.builder, ty, c_name)
+            llvm::LLVMBuildAlloca(self.builder, ty, c_name.as_ptr())
         }
     }
 
-    pub fn build_store(&self, val: ValueRef, ptr: ValueRef) -> ValueRef {
+    pub fn build_store(&mut self, val: LLVMValueRef, ptr: LLVMValueRef) -> LLVMValueRef {
         unsafe {
             llvm::LLVMBuildStore(self.builder, val, ptr)
         }
     }
 
-    pub fn build_load(&self, ptr: ValueRef, name: &str) -> ValueRef {
-        let c_name = str_to_c_str(name);
+    pub fn build_load(&mut self, ptr: LLVMValueRef, name: &str) -> LLVMValueRef {
+        let c_name = CString::new(name).unwrap();
         unsafe {
-            llvm::LLVMBuildLoad(self.builder, ptr, c_name)
+            llvm::LLVMBuildLoad(self.builder, ptr, c_name.as_ptr())
         }
     }
 
-    pub fn build_call(&self, func: ValueRef, args: Vec<ValueRef>,
-                      name: &str) -> ValueRef {
-        let c_name = str_to_c_str(name);
+    pub fn build_call(&mut self, func: LLVMValueRef, mut args: Vec<LLVMValueRef>,
+                      name: &str) -> LLVMValueRef {
+        let c_name = CString::new(name).unwrap();
         unsafe {
-            llvm::LLVMBuildCall(self.builder, func, args.as_ptr(), args.len() as u32, c_name)
+            llvm::LLVMBuildCall(self.builder, func, args.as_mut_ptr(), args.len() as u32,
+                                c_name.as_ptr())
         }
     }
 
-    pub fn build_add(&self, lhs: ValueRef, rhs: ValueRef, name: &str) -> ValueRef {
-        let c_name = str_to_c_str(name);
+    pub fn build_add(&mut self, lhs: LLVMValueRef, rhs: LLVMValueRef, name: &str) -> LLVMValueRef {
+        let c_name = CString::new(name).unwrap();
         unsafe {
-            llvm::LLVMBuildAdd(self.builder, lhs, rhs, c_name)
+            llvm::LLVMBuildAdd(self.builder, lhs, rhs, c_name.as_ptr())
         }
     }
 
-    pub fn build_sub(&self, lhs: ValueRef, rhs: ValueRef, name: &str) -> ValueRef {
-        let c_name = str_to_c_str(name);
+    pub fn build_sub(&mut self, lhs: LLVMValueRef, rhs: LLVMValueRef, name: &str) -> LLVMValueRef {
+        let c_name = CString::new(name).unwrap();
         unsafe {
-            llvm::LLVMBuildSub(self.builder, lhs, rhs, c_name)
+            llvm::LLVMBuildSub(self.builder, lhs, rhs, c_name.as_ptr())
         }
     }
 
-    pub fn build_mul(&self, lhs: ValueRef, rhs: ValueRef, name: &str) -> ValueRef {
-        let c_name = str_to_c_str(name);
+    pub fn build_mul(&mut self, lhs: LLVMValueRef, rhs: LLVMValueRef, name: &str) -> LLVMValueRef {
+        let c_name = CString::new(name).unwrap();
         unsafe {
-            llvm::LLVMBuildMul(self.builder, lhs, rhs, c_name)
+            llvm::LLVMBuildMul(self.builder, lhs, rhs, c_name.as_ptr())
         }
     }
 }
@@ -226,69 +223,115 @@ impl Drop for Builder {
     }
 }
 
-pub fn function_type(ret_ty: TypeRef, param_types: Vec<TypeRef>, is_var_args: bool) -> TypeRef {
+pub fn function_type(ret_ty: LLVMTypeRef, mut param_types: Vec<LLVMTypeRef>,
+                     is_var_args: bool) -> LLVMTypeRef {
     unsafe {
-        llvm::LLVMFunctionType(ret_ty, param_types.as_ptr(), param_types.len() as u32,
-                               is_var_args as u32)
+        llvm::LLVMFunctionType(ret_ty, param_types.as_mut_ptr(), param_types.len() as u32,
+                               is_var_args as i32)
     }
 }
 
-pub fn pointer_type(ty: TypeRef, address_space: u32) -> TypeRef {
+pub fn pointer_type(ty: LLVMTypeRef, address_space: u32) -> LLVMTypeRef {
     unsafe {
         llvm::LLVMPointerType(ty, address_space)
     }
 }
 
-pub fn get_first_param(func: ValueRef) -> ValueRef {
+pub fn get_first_param(func: LLVMValueRef) -> LLVMValueRef {
     unsafe {
         llvm::LLVMGetFirstParam(func)
     }
 }
 
-pub fn get_next_param(param: ValueRef) -> ValueRef {
+pub fn get_next_param(param: LLVMValueRef) -> LLVMValueRef {
     unsafe {
         llvm::LLVMGetNextParam(param)
     }
 }
 
-pub fn set_value_name(val: ValueRef, name: &str) {
-    let c_name = str_to_c_str(name);
+pub fn set_value_name(val: LLVMValueRef, name: &str) {
+    let c_name = CString::new(name).unwrap();
     unsafe {
-        llvm::LLVMSetValueName(val, c_name);
+        llvm::LLVMSetValueName(val, c_name.as_ptr());
     }
 }
 
-pub fn create_pass_manager() -> PassManagerRef {
+pub fn create_pass_manager() -> LLVMPassManagerRef {
     unsafe {
         llvm::LLVMCreatePassManager()
     }
 }
 
-pub fn rust_print_module(pm: PassManagerRef, module: ModuleRef, path: &str) {
-    let c_path = str_to_c_str(path);
+pub fn print_module_to_file(module: &Module, path: &str) -> Result<(), &'static str> {
+    let c_path = CString::new(path).unwrap();
+    let mut em: usize = 0;
+    let em_ptr: *mut usize = &mut em;
     unsafe {
-        llvm::LLVMRustPrintModule(pm, module, c_path);
+        llvm::LLVMPrintModuleToFile(module.module, c_path.as_ptr(), em_ptr as *mut *mut i8);
+        if em == 0 { // no error message was set
+            Ok(())
+        } else {
+            Err(c_str_to_str!(em as *const i8))
+        }
     }
 }
 
-pub fn rust_create_target_machine(triple: &str, cpu: &str, features: &str, model: CodeGenModel,
-                                  reloc: RelocMode, level: CodeGenOptLevel, enable_segstk: bool,
-                                  use_soft_fp: bool, no_frame_pointer_elim: bool, pie: bool,
-                                  func_sections: bool, data_sections: bool) -> TargetMachineRef {
-    let c_triple = str_to_c_str(triple);
-    let c_cpu = str_to_c_str(cpu);
-    let c_features = str_to_c_str(features);
+// TODO: Lifetime of &str
+pub fn print_module_to_string<'a>(module: &'a Module) -> &'a str {
     unsafe {
-        llvm::LLVMRustCreateTargetMachine(c_triple, c_cpu, c_features, model, reloc, level,
-                                          enable_segstk, use_soft_fp, no_frame_pointer_elim, pie,
-                                          func_sections, data_sections)
+        c_str_to_str!(llvm::LLVMPrintModuleToString(module.module))
     }
 }
 
-pub fn rust_write_output_file(target: TargetMachineRef, pm: PassManagerRef, module: Module,
-                              path: &str, file_type: FileType) -> bool {
-    let c_path = str_to_c_str(path);
+pub fn get_target_from_name(name: &str) -> LLVMTargetRef {
+    let c_name = CString::new(name).unwrap();
     unsafe {
-        llvm::LLVMRustWriteOutputFile(target, pm, module.module, c_path, file_type)
+        LLVMGetTargetFromName(c_name.as_ptr())
+    }
+}
+
+pub fn create_target_machine(target: LLVMTargetRef, triple: &str, cpu: &str, features: &str,
+                             level: LLVMCodeGenOptLevel, reloc: LLVMRelocMode,
+                             model: LLVMCodeModel) -> LLVMTargetMachineRef {
+    let c_triple = CString::new(triple).unwrap();
+    let c_cpu = CString::new(cpu).unwrap();
+    let c_features = CString::new(features).unwrap();
+    unsafe {
+        LLVMCreateTargetMachine(target, c_triple.as_ptr(), c_cpu.as_ptr(),
+                                c_features.as_ptr(), level, reloc, model)
+    }
+}
+
+pub fn target_machine_emit_to_file(target: LLVMTargetMachineRef, module: &mut Module, path: &str,
+                                   file_type: LLVMCodeGenFileType) -> Result<(), &'static str> {
+    let c_path = CString::new(path).unwrap();
+    let mut em: usize = 0;
+    let em_ptr: *mut usize = &mut em;
+    unsafe {
+        LLVMTargetMachineEmitToFile(target, module.module, c_path.as_ptr() as *mut i8,
+                                    file_type, em_ptr as *mut *mut i8);
+        if em == 0 { // no error message was set
+            Ok(())
+        } else {
+            Err(c_str_to_str!(em as *const i8))
+        }
+    }
+}
+
+pub fn initialize_native_target() {
+    unsafe {
+        LLVM_InitializeNativeTarget();
+    }
+}
+
+pub fn initialize_native_asm_printer() {
+    unsafe {
+        LLVM_InitializeNativeAsmPrinter();
+    }
+}
+
+pub fn get_default_target_triple<'a>() -> &'a str {
+    unsafe {
+        c_str_to_str!(LLVMGetDefaultTargetTriple())
     }
 }
