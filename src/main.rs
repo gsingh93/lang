@@ -4,6 +4,10 @@
 extern crate llvm_sys;
 extern crate getopts;
 extern crate rustc_serialize;
+extern crate env_logger;
+
+#[macro_use]
+extern crate log;
 
 mod llvm;
 
@@ -13,9 +17,12 @@ use llvm_sys::prelude::*;
 use llvm_sys::target_machine::*;
 use BinOp::{AddOp, SubOp, MulOp, DivOp};
 
+use getopts::Options;
+
 use std::env;
 use std::fs::File;
 use std::io::Read;
+use std::path::Path;
 
 peg_file! lang("grammar.rustpeg");
 
@@ -204,13 +211,79 @@ enum BinOp {
     EqualsOp
 }
 
-fn get_filename() -> Result<String, String> {
-    let args: Vec<String> = env::args().collect();
-    if args.len() > 1 {
-        Ok(args[1].clone())
-    } else {
-        Err(args[0].clone())
+#[derive(Debug, Eq, PartialEq)]
+enum OutputType {
+    LLVM,
+    Assembly,
+    Object
+}
+
+#[derive(Debug)]
+struct Config {
+    input_filename: String,
+    output_filename: String,
+    output_type: OutputType,
+}
+
+impl Config {
+    fn new(in_file: String, out_file: String, type_: OutputType) -> Self {
+        Config { input_filename: in_file, output_filename: out_file, output_type: type_ }
     }
+}
+
+fn parse_options() -> Option<Config> {
+    fn print_usage(program: &str, opts: Options) {
+        print!("{}", opts.usage(&format!("Usage: {} [options]", program)));
+    }
+
+    let mut opts = Options::new();
+    opts.optflag("h", "help", "print this help menu");
+    opts.optopt("t", "type", "output type (llvm (default), as, or obj)", "TYPE");
+    opts.optopt("o", "output", "output file name", "FILE");
+    let args: Vec<_> = env::args().collect();
+
+    let matches = match opts.parse(&args[1..]) {
+        Ok(m) => m,
+        Err(e) => panic!("{}", e)
+    };
+
+    if matches.opt_present("h") {
+        print_usage(&args[0], opts);
+        return None;
+    }
+
+    let input_filename = if !matches.free.is_empty() {
+        matches.free[0].clone()
+    } else {
+        print_usage(&args[0], opts);
+        return None;
+    };
+
+    let output_type = if matches.opt_present("t") {
+        let type_name = matches.opt_str("t").unwrap();
+        match &*type_name {
+            "llvm" => OutputType::LLVM,
+            "as" => OutputType::Assembly,
+            "obj" => OutputType::Object,
+            _ => panic!("Invalid output type '{}'", type_name)
+        }
+    } else {
+        OutputType::LLVM
+    };
+
+    let output_filename = if matches.opt_present("o") {
+        matches.opt_str("o").unwrap()
+    } else {
+        let mut base = Path::new(&input_filename).file_stem().unwrap().to_str().unwrap().to_owned();
+        match output_type {
+            OutputType::LLVM => base.push_str(".ll"),
+            OutputType::Assembly => base.push_str(".s"),
+            OutputType::Object => base.push_str(".o"),
+        }
+        base
+    };
+
+    Some(Config::new(input_filename, output_filename, output_type))
 }
 
 fn construct_ast(filename: &str) -> Program {
@@ -228,21 +301,27 @@ fn construct_ast(filename: &str) -> Program {
 }
 
 fn main() {
-    let filename = match get_filename() {
-        Ok(f) => f,
-        Err(name) => { println!("Usage: {} filename", name); return }
+    env_logger::init().unwrap();
+    let config = match parse_options() {
+        Some(config) => config,
+        None => return
     };
-    let ast = construct_ast(&filename);
+    debug!("Configuration: {:?}", config);
+
+    let ast = construct_ast(&config.input_filename);
     let mut context = Ctxt::new("main");
     ast.gen(&mut context);
 
-    if true {
-        if true {
-            llvm::print_module_to_file(&context.module, "foo.ll").unwrap();
-        } else {
-            println!("{}", llvm::print_module_to_string(&context.module));
-        }
-    } else if true {
+    if config.output_type == OutputType::LLVM {
+        llvm::print_module_to_file(&context.module, &config.output_filename).unwrap();
+        // TODO: stdout: println!("{}", llvm::print_module_to_string(&context.module));
+    } else {
+        let file_type = match config.output_type {
+            OutputType::Assembly => LLVMCodeGenFileType::LLVMAssemblyFile,
+            OutputType::Object => LLVMCodeGenFileType::LLVMObjectFile,
+            _ => unreachable!()
+        };
+
         llvm::initialize_native_target();
         llvm::initialize_native_asm_printer();
 
@@ -252,8 +331,8 @@ fn main() {
                                              LLVMCodeGenOptLevel::LLVMCodeGenLevelNone,
                                              LLVMRelocMode::LLVMRelocDefault,
                                              LLVMCodeModel::LLVMCodeModelDefault);
-        let file_type = LLVMCodeGenFileType::LLVMAssemblyFile;
-        llvm::target_machine_emit_to_file(tm, &mut context.module, "foo.out", file_type).unwrap()
+        llvm::target_machine_emit_to_file(tm, &mut context.module, &config.output_filename,
+                                          file_type).unwrap()
     }
 }
 
