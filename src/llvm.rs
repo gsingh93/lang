@@ -62,6 +62,12 @@ impl Context {
         Module { module: module }
     }
 
+    pub fn void_type(&self) -> LLVMTypeRef {
+        unsafe {
+            llvm::LLVMVoidTypeInContext(self.context)
+        }
+    }
+
     pub fn int32_type(&self) -> LLVMTypeRef {
         unsafe {
             llvm::LLVMInt32TypeInContext(self.context)
@@ -243,22 +249,28 @@ pub fn pointer_type(ty: LLVMTypeRef, address_space: u32) -> LLVMTypeRef {
     }
 }
 
-pub fn get_first_param(func: LLVMValueRef) -> LLVMValueRef {
+pub fn get_first_param(func: LLVMValueRef) -> Option<LLVMValueRef> {
     let res = unsafe {
         llvm::LLVMGetFirstParam(func)
     };
-    // TODO: We assert for now, but we should replace this API with a safe iterator in the future
-    assert!(!res.is_null());
-    res
+    // TODO: We should replace this API with a safe iterator in the future
+    if res.is_null() {
+        None
+    } else {
+        Some(res)
+    }
 }
 
-pub fn get_next_param(param: LLVMValueRef) -> LLVMValueRef {
+pub fn get_next_param(param: LLVMValueRef) -> Option<LLVMValueRef> {
     let res = unsafe {
         llvm::LLVMGetNextParam(param)
     };
-    // TODO: We assert for now, but we should replace this API with a safe iterator in the future
-    assert!(!res.is_null());
-    res
+    // TODO: We should replace this API with a safe iterator in the future
+    if res.is_null() {
+        None
+    } else {
+        Some(res)
+    }
 }
 
 pub fn set_value_name(val: LLVMValueRef, name: &str) {

@@ -58,9 +58,10 @@ impl FnDecl {
 
         let mut param = llvm::get_first_param(func);
         for var in self.args.args.iter() {
-            ctxt.named_values.insert(var.name.clone(), param);
-            llvm::set_value_name(param, &var.name);
-            param = llvm::get_next_param(param);
+            let param_ = param.unwrap();
+            ctxt.named_values.insert(var.name.clone(), param_);
+            llvm::set_value_name(param_, &var.name);
+            param = llvm::get_next_param(param_);
         }
 
         let basic_block = ctxt.context.append_basic_block(func, "entry");
@@ -96,6 +97,8 @@ struct Variable {
 enum Type {
     IntTy,
     StringTy,
+    VoidTy,
+    BoolTy,
     UserTy(String)
 }
 
@@ -104,6 +107,8 @@ impl Type {
         match self {
             &Type::IntTy => ctxt.context.int32_type(),
             &Type::StringTy => llvm::pointer_type(ctxt.context.int8_type(), 0),
+            &Type::VoidTy => ctxt.context.void_type(),
+            &Type::BoolTy => ctxt.context.int1_type(),
             _ => unimplemented!()
         }
     }
@@ -215,6 +220,7 @@ enum BinOp {
 
 #[derive(Debug, Eq, PartialEq)]
 enum OutputType {
+    AST,
     LLVM,
     Assembly,
     Object
@@ -223,12 +229,12 @@ enum OutputType {
 #[derive(Debug)]
 struct Config {
     input_filename: String,
-    output_filename: String,
+    output_filename: Option<String>,
     output_type: OutputType,
 }
 
 impl Config {
-    fn new(in_file: String, out_file: String, type_: OutputType) -> Self {
+    fn new(in_file: String, out_file: Option<String>, type_: OutputType) -> Self {
         Config { input_filename: in_file, output_filename: out_file, output_type: type_ }
     }
 }
@@ -264,6 +270,7 @@ fn parse_options() -> Option<Config> {
     let output_type = if matches.opt_present("t") {
         let type_name = matches.opt_str("t").unwrap();
         match &*type_name {
+            "ast" => OutputType::AST,
             "llvm" => OutputType::LLVM,
             "as" => OutputType::Assembly,
             "obj" => OutputType::Object,
@@ -273,16 +280,23 @@ fn parse_options() -> Option<Config> {
         OutputType::LLVM
     };
 
-    let output_filename = if matches.opt_present("o") {
-        matches.opt_str("o").unwrap()
-    } else {
-        let mut base = Path::new(&input_filename).file_stem().unwrap().to_str().unwrap().to_owned();
-        match output_type {
-            OutputType::LLVM => base.push_str(".ll"),
-            OutputType::Assembly => base.push_str(".s"),
-            OutputType::Object => base.push_str(".o"),
+
+    let output_filename = if output_type != OutputType::AST {
+        if matches.opt_present("o") {
+            Some(matches.opt_str("o").unwrap())
+        } else {
+            let mut base = Path::new(&input_filename).file_stem().unwrap()
+                .to_str().unwrap().to_owned();
+            match output_type {
+                OutputType::LLVM => base.push_str(".ll"),
+                OutputType::Assembly => base.push_str(".s"),
+                OutputType::Object => base.push_str(".o"),
+                _ => unreachable!()
+            }
+            Some(base)
         }
-        base
+    } else {
+        None
     };
 
     Some(Config::new(input_filename, output_filename, output_type))
@@ -312,12 +326,17 @@ fn main() {
 
     let ast = construct_ast(&config.input_filename);
     let mut context = Ctxt::new("main");
-    ast.gen(&mut context);
 
-    if config.output_type == OutputType::LLVM {
-        llvm::print_module_to_file(&context.module, &config.output_filename).unwrap();
+
+    if config.output_type == OutputType::AST {
+        println!("{:?}", ast)
+    } else if config.output_type == OutputType::LLVM {
+        ast.gen(&mut context);
+        llvm::print_module_to_file(&context.module,
+                                   config.output_filename.as_ref().unwrap()).unwrap();
         // TODO: stdout: println!("{}", llvm::print_module_to_string(&context.module));
     } else {
+        ast.gen(&mut context);
         let file_type = match config.output_type {
             OutputType::Assembly => LLVMCodeGenFileType::LLVMAssemblyFile,
             OutputType::Object => LLVMCodeGenFileType::LLVMObjectFile,
@@ -333,7 +352,8 @@ fn main() {
                                              LLVMCodeGenOptLevel::LLVMCodeGenLevelNone,
                                              LLVMRelocMode::LLVMRelocDefault,
                                              LLVMCodeModel::LLVMCodeModelDefault);
-        llvm::target_machine_emit_to_file(tm, &mut context.module, &config.output_filename,
+        llvm::target_machine_emit_to_file(tm, &mut context.module,
+                                          config.output_filename.as_ref().unwrap(),
                                           file_type).unwrap()
     }
 }

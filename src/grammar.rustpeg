@@ -1,7 +1,7 @@
 use super::{Program, FnDecl, Block, Stmt, Expr, BinOp, Type, ArgList, Variable};
 use Expr::{True, False, Num, BinExpr, EmptyExpr, IdentExpr, FuncCallExpr};
 use Stmt::{DeclStmt, ExprStmt, ReturnStmt, AssignStmt, IfStmt, WhileStmt};
-use Type::{IntTy, StringTy, UserTy};
+use Type::{IntTy, StringTy, BoolTy, VoidTy, UserTy};
 use BinOp::{AddOp, SubOp, MulOp, DivOp, LessOp, GreaterOp, EqualsOp};
 use std::i32;
 
@@ -15,7 +15,8 @@ func_decl -> FnDecl
     }
 
 type -> Type
-    = "int" __ { IntTy } / "string" __ { StringTy } / name:ident { UserTy(name) }
+    = "int" __ { IntTy } / "string" __ { StringTy } / "bool" __ { BoolTy } / "void" __ { VoidTy }
+    / name:ident { UserTy(name) }
 
 variable -> Variable
     = ty:type name:ident { Variable { ty: ty, name: name } }
