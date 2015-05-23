@@ -28,7 +28,8 @@ peg_file! lang("grammar.rustpeg");
 
 #[derive(Debug, Eq, PartialEq, RustcDecodable, RustcEncodable)]
 pub struct Program {
-    fns: Vec<FnDecl>
+    extern_decls: Vec<ExternDecl>,
+    fns: Vec<Function>
 }
 
 impl Program {
@@ -40,17 +41,19 @@ impl Program {
 }
 
 #[derive(Debug, Eq, PartialEq, RustcDecodable, RustcEncodable)]
+struct ExternDecl {
+    decl: FnDecl
+}
+
+#[derive(Debug, Eq, PartialEq, RustcDecodable, RustcEncodable)]
 struct FnDecl {
     ty: Type,
     name: String,
-    args: ArgList,
-    block: Block
+    args: ArgList
 }
 
 impl FnDecl {
-    fn gen(&self, ctxt: &mut Ctxt) {
-        assert_eq!(ctxt.named_values.len(), 0);
-
+    fn gen(&self, ctxt: &mut Ctxt) -> LLVMValueRef {
         let ret_ty = self.ty.gen_type(ctxt);
         let param_types = self.args.gen_types(ctxt);
         let func_ty = llvm::function_type(ret_ty, param_types, false);
@@ -63,6 +66,22 @@ impl FnDecl {
             llvm::set_value_name(param_, &var.name);
             param = llvm::get_next_param(param_);
         }
+
+        func
+    }
+}
+
+#[derive(Debug, Eq, PartialEq, RustcDecodable, RustcEncodable)]
+struct Function {
+    decl: FnDecl,
+    block: Block
+}
+
+impl Function {
+    fn gen(&self, ctxt: &mut Ctxt) {
+        assert_eq!(ctxt.named_values.len(), 0);
+
+        let func = self.decl.gen(ctxt);
 
         let basic_block = ctxt.context.append_basic_block(func, "entry");
         ctxt.builder.position_at_end(basic_block);
