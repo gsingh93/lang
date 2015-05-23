@@ -152,6 +152,7 @@ impl Stmt {
                 let expr_res = e.gen(ctxt);
                 ctxt.builder.build_store(expr_res, val)
             }
+            _ => unimplemented!()
         };
     }
 }
@@ -183,7 +184,8 @@ impl Expr {
                     AddOp => ctxt.builder.build_add(left, right, "addtmp"),
                     SubOp => ctxt.builder.build_sub(left, right, "subtmp"),
                     MulOp => ctxt.builder.build_mul(left, right, "multmp"),
-                    DivOp => unimplemented!()
+                    DivOp => unimplemented!(),
+                    _ => unimplemented!()
                 }
             }
             &Expr::IdentExpr(ref name) => {
