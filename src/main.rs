@@ -191,7 +191,7 @@ impl Expr {
                 ctxt.builder.build_load(ptr, name)
             },
             &Expr::FuncCallExpr(ref func_name, ref arg_exprs) => {
-                let func = ctxt.module.get_named_function(func_name);
+                let func = ctxt.module.get_named_function(func_name).unwrap();
                 let args: Vec<_> = arg_exprs.iter().map(|e| e.gen(ctxt)).collect();
                 ctxt.builder.build_call(func, args, func_name)
             }
@@ -325,7 +325,7 @@ fn main() {
         llvm::initialize_native_target();
         llvm::initialize_native_asm_printer();
 
-        let target = llvm::get_target_from_name("x86-64");
+        let target = llvm::get_target_from_name("x86-64").unwrap();
         let triple = llvm::get_default_target_triple();
         let tm = llvm::create_target_machine(target, triple, "", "",
                                              LLVMCodeGenOptLevel::LLVMCodeGenLevelNone,

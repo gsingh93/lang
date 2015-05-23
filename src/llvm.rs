@@ -131,10 +131,16 @@ impl Module {
         }
     }
 
-    pub fn get_named_function(&mut self, name: &str) -> LLVMValueRef {
+    pub fn get_named_function(&mut self, name: &str) -> Option<LLVMValueRef> {
         let c_name = CString::new(name).unwrap();
-        unsafe {
+        let res = unsafe {
             llvm::LLVMGetNamedFunction(self.module, c_name.as_ptr())
+        };
+
+        if res.is_null() {
+            None
+        } else {
+            Some(res)
         }
     }
 }
@@ -238,15 +244,21 @@ pub fn pointer_type(ty: LLVMTypeRef, address_space: u32) -> LLVMTypeRef {
 }
 
 pub fn get_first_param(func: LLVMValueRef) -> LLVMValueRef {
-    unsafe {
+    let res = unsafe {
         llvm::LLVMGetFirstParam(func)
-    }
+    };
+    // TODO: We assert for now, but we should replace this API with a safe iterator in the future
+    assert!(!res.is_null());
+    res
 }
 
 pub fn get_next_param(param: LLVMValueRef) -> LLVMValueRef {
-    unsafe {
+    let res = unsafe {
         llvm::LLVMGetNextParam(param)
-    }
+    };
+    // TODO: We assert for now, but we should replace this API with a safe iterator in the future
+    assert!(!res.is_null());
+    res
 }
 
 pub fn set_value_name(val: LLVMValueRef, name: &str) {
@@ -283,10 +295,16 @@ pub fn print_module_to_string<'a>(module: &'a Module) -> &'a str {
     }
 }
 
-pub fn get_target_from_name(name: &str) -> LLVMTargetRef {
+pub fn get_target_from_name(name: &str) -> Option<LLVMTargetRef> {
     let c_name = CString::new(name).unwrap();
-    unsafe {
+    let res = unsafe {
         LLVMGetTargetFromName(c_name.as_ptr())
+    };
+
+    if res.is_null() {
+        None
+    } else {
+        Some(res)
     }
 }
 
