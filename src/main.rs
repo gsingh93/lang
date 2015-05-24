@@ -88,6 +88,10 @@ impl Function {
         ctxt.builder.position_at_end(basic_block);
         self.block.gen(ctxt);
 
+        if self.decl.ty == Type::VoidTy {
+            ctxt.builder.build_ret_void();
+        }
+
         ctxt.named_values.clear();
     }
 }
@@ -207,7 +211,7 @@ impl Literal {
                 llvm::const_int(ty, *n as u64, false)
             }
             &Literal::StrLit(ref s) => {
-                let i32_ty = ctxt.context.int32_type();
+                let i32_ty = ctxt.context.int32_type(); // TODO: Can I reuse this?
                 let indices = vec![llvm::const_int(i32_ty, 0, false),
                                    llvm::const_int(i32_ty, 0, false)];
                 let ptr = ctxt.builder.build_global_string(s, "str1"); // TODO
@@ -284,7 +288,7 @@ fn parse_options() -> Option<Config> {
 
     let mut opts = Options::new();
     opts.optflag("h", "help", "print this help menu");
-    opts.optopt("t", "type", "output type (llvm (default), as, or obj)", "TYPE");
+    opts.optopt("t", "type", "output type (llvm (default), asm, or obj)", "TYPE");
     opts.optopt("o", "output", "output file name", "FILE");
     let args: Vec<_> = env::args().collect();
 
@@ -310,7 +314,7 @@ fn parse_options() -> Option<Config> {
         match &*type_name {
             "ast" => OutputType::AST,
             "llvm" => OutputType::LLVM,
-            "as" => OutputType::Assembly,
+            "asm" => OutputType::Assembly,
             "obj" => OutputType::Object,
             _ => panic!("Invalid output type '{}'", type_name)
         }

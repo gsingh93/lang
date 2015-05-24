@@ -170,6 +170,12 @@ impl Builder {
         }
     }
 
+    pub fn build_ret_void(&self) -> LLVMValueRef {
+        unsafe {
+            llvm::LLVMBuildRetVoid(self.builder)
+        }
+    }
+
     pub fn build_alloca(&mut self, ty: LLVMTypeRef, name: &str) -> LLVMValueRef {
         let c_name = CString::new(name).unwrap();
         unsafe {
