@@ -1,8 +1,9 @@
 use super::{Program, FnDecl, Block, Stmt, Expr, BinOp, Type, ArgList, Variable, Function,
-            ExternDecl};
-use Expr::{True, False, Num, BinExpr, EmptyExpr, IdentExpr, FuncCallExpr};
+            ExternDecl, Literal};
+use Expr::{BinExpr, EmptyExpr, IdentExpr, FuncCallExpr, LitExpr};
 use Stmt::{DeclStmt, ExprStmt, ReturnStmt, AssignStmt, IfStmt, WhileStmt};
 use Type::{IntTy, StringTy, BoolTy, VoidTy, UserTy};
+use Literal::{BoolLit, NumLit, StrLit};
 use BinOp::{AddOp, SubOp, MulOp, DivOp, LessOp, GreaterOp, EqualsOp};
 use std::i32;
 
@@ -71,7 +72,6 @@ while_stmt -> Stmt
 
 expr -> Expr
     = t:term e:bin_expr_ {
-        println!("got term {:?}", t);
         match e {
             EmptyExpr => t,
             BinExpr(box EmptyExpr, op, e2) => BinExpr(Box::new(t), op, e2),
@@ -88,7 +88,8 @@ bin_expr -> Expr
     }
 
 term -> Expr
-    = true_kw { True } / false_kw { False } / num / name:ident e:func_or_ident_expr {
+    = true_kw { LitExpr(BoolLit(true)) } / false_kw { LitExpr(BoolLit(false)) }
+    / l:num { LitExpr(l) } / l:str_lit { LitExpr(l) } / name:ident e:func_or_ident_expr {
         match e {
             EmptyExpr => IdentExpr(name),
             FuncCallExpr(_, params) => FuncCallExpr(name, params),
@@ -103,24 +104,26 @@ func_or_ident_expr -> Expr
 param_list -> Vec<Expr>
     = expr ** comma
 
-num -> Expr
-    = n:([0-9]+ {match_str.parse().unwrap()}) __ {
+str_lit -> Literal
+    = quote s:([^"]* { match_str.to_owned() }) quote { StrLit(s) }
+
+num -> Literal
+    = n:([0-9]+ { match_str.parse().unwrap() }) __ {
         if n > i32::MAX {
             panic!("Integer literal {} too large", n)
         }
-        Num(n)
+        NumLit(n)
     }
 
 bin_op -> BinOp
     = add_tok { AddOp } / sub_tok { SubOp } / mul_tok { MulOp } / div_tok { DivOp }
     / lt_tok { LessOp } / gt_tok { GreaterOp } / eq_tok { EqualsOp }
 
-
 ident_char -> char
     = [a-zA-Z0-9_] { match_str.char_at(0) }
 
 ident -> String
-    = name:(letter ident_char* { match_str.to_string() }) __ { name }
+    = name:(letter ident_char* { match_str.to_owned() }) __ { name }
 
 letter -> char
     = [a-zA-Z] { match_str.char_at(0) }
@@ -148,6 +151,7 @@ lbrace = '{' __
 rbrace = '}' __
 equals = '=' __
 comma = ',' __
+quote = '"'
 
 __ = (whitespace / eol / comment)*
 

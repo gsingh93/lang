@@ -13,6 +13,7 @@ mod llvm;
 
 use llvm::Ctxt;
 use lang::program;
+use llvm_sys::core::*;
 use llvm_sys::prelude::*;
 use llvm_sys::target_machine::*;
 use BinOp::{AddOp, SubOp, MulOp, DivOp};
@@ -183,24 +184,42 @@ impl Stmt {
 
 #[derive(Debug, Eq, PartialEq, RustcDecodable, RustcEncodable)]
 enum Expr {
-    True,
-    False,
-    Num(i32),
+    LitExpr(Literal),
     BinExpr(Box<Expr>, BinOp, Box<Expr>),
     EmptyExpr,
     IdentExpr(String),
     FuncCallExpr(String, Vec<Expr>)
 }
 
-impl Expr {
+#[derive(Debug, Eq, PartialEq, RustcDecodable, RustcEncodable)]
+enum Literal {
+    NumLit(i32),
+    BoolLit(bool),
+    StrLit(String)
+}
+
+impl Literal {
     fn gen(&self, ctxt: &mut Ctxt) -> LLVMValueRef {
         match self {
-            &Expr::True => ctxt.context.const_bool(true),
-            &Expr::False => ctxt.context.const_bool(false),
-            &Expr::Num(ref n) => {
+            &Literal::BoolLit(b) => ctxt.context.const_bool(b),
+            &Literal::NumLit(ref n) => {
                 let ty = ctxt.context.int32_type();
                 llvm::const_int(ty, *n as u64, false)
             }
+            &Literal::StrLit(ref s) => {
+                let i32_ty = ctxt.context.int32_type();
+                let indices = vec![llvm::const_int(i32_ty, 0, false),
+                                   llvm::const_int(i32_ty, 0, false)];
+                let ptr = ctxt.builder.build_global_string(s, "str1"); // TODO
+                ctxt.builder.build_in_bounds_gep(ptr, indices, "str1")
+            }
+        }
+    }
+}
+impl Expr {
+    fn gen(&self, ctxt: &mut Ctxt) -> LLVMValueRef {
+        match self {
+            &Expr::LitExpr(ref lit) => lit.gen(ctxt),
             &Expr::BinExpr(ref l, op, ref r) => {
                 let left = l.gen(ctxt);
                 let right = r.gen(ctxt);

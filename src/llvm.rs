@@ -105,12 +105,6 @@ impl Context {
     }
 }
 
-pub fn const_int(ty: LLVMTypeRef, val: u64, signed: bool) -> LLVMValueRef {
-    unsafe {
-        llvm::LLVMConstInt(ty, val, signed as i32)
-    }
-}
-
 impl Drop for Context {
     fn drop(&mut self) {
         unsafe {
@@ -225,6 +219,23 @@ impl Builder {
             llvm::LLVMBuildMul(self.builder, lhs, rhs, c_name.as_ptr())
         }
     }
+
+    pub fn build_global_string(&self, s: &str, name: &str) -> LLVMValueRef {
+        let c_s = CString::new(s).unwrap();
+        let c_name = CString::new(name).unwrap();
+        unsafe {
+            llvm::LLVMBuildGlobalString(self.builder, c_s.as_ptr(), c_name.as_ptr())
+        }
+    }
+
+    pub fn build_in_bounds_gep(&self, ptr: LLVMValueRef, mut indices: Vec<LLVMValueRef>,
+                               name: &str) -> LLVMValueRef {
+        let c_name = CString::new(name).unwrap();
+        unsafe {
+            llvm::LLVMBuildInBoundsGEP(self.builder, ptr, indices.as_mut_ptr(),
+                                       indices.len() as u32, c_name.as_ptr())
+        }
+    }
 }
 
 impl Drop for Builder {
@@ -232,6 +243,12 @@ impl Drop for Builder {
         unsafe {
             llvm::LLVMDisposeBuilder(self.builder);
         }
+    }
+}
+
+pub fn const_int(ty: LLVMTypeRef, val: u64, signed: bool) -> LLVMValueRef {
+    unsafe {
+        llvm::LLVMConstInt(ty, val, signed as i32)
     }
 }
 
