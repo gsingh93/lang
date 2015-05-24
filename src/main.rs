@@ -35,6 +35,11 @@ pub struct Program {
 
 impl Program {
     fn gen(&self, ctxt: &mut Ctxt) {
+        for decl in self.extern_decls.iter() {
+            decl.gen(ctxt);
+        }
+        ctxt.named_values.clear();
+
         for func in self.fns.iter() {
             func.gen(ctxt);
         }
@@ -44,6 +49,12 @@ impl Program {
 #[derive(Debug, Eq, PartialEq, RustcDecodable, RustcEncodable)]
 struct ExternDecl {
     decl: FnDecl
+}
+
+impl ExternDecl {
+    fn gen(&self, ctxt: &mut Ctxt) {
+        self.decl.gen(ctxt);
+    }
 }
 
 #[derive(Debug, Eq, PartialEq, RustcDecodable, RustcEncodable)]
