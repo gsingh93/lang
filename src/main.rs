@@ -11,12 +11,13 @@ extern crate log;
 
 mod llvm;
 
+use llvm_sys::LLVMIntPredicate::*;
 use llvm::Ctxt;
 use lang::program;
 use llvm_sys::core::*;
 use llvm_sys::prelude::*;
 use llvm_sys::target_machine::*;
-use BinOp::{AddOp, SubOp, MulOp, DivOp};
+use BinOp::{AddOp, SubOp, MulOp, DivOp, LessOp, GreaterOp, EqualsOp};
 
 use getopts::Options;
 
@@ -232,6 +233,7 @@ impl Literal {
         }
     }
 }
+
 impl Expr {
     fn gen(&self, ctxt: &mut Ctxt) -> LLVMValueRef {
         match self {
@@ -243,8 +245,10 @@ impl Expr {
                     AddOp => ctxt.builder.build_add(left, right, "addtmp"),
                     SubOp => ctxt.builder.build_sub(left, right, "subtmp"),
                     MulOp => ctxt.builder.build_mul(left, right, "multmp"),
-                    DivOp => unimplemented!(),
-                    _ => unimplemented!()
+                    DivOp => ctxt.builder.build_sdiv(left, right, "sdivtmp"),
+                    LessOp => ctxt.builder.build_icmp(LLVMIntSLT, left, right, "slt"),
+                    GreaterOp => ctxt.builder.build_icmp(LLVMIntSGT, left, right, "sgt"),
+                    EqualsOp => ctxt.builder.build_icmp(LLVMIntEQ, left, right, "eq")
                 }
             }
             &Expr::IdentExpr(ref name) => {

@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::ffi::{CString, CStr};
 
+use llvm_sys::*;
 use llvm_sys::prelude::*;
 use llvm_sys::target_machine::*;
 use llvm_sys::target::*;
@@ -225,6 +226,22 @@ impl Builder {
         let c_name = CString::new(name).unwrap();
         unsafe {
             llvm::LLVMBuildMul(self.builder, lhs, rhs, c_name.as_ptr())
+        }
+    }
+
+    pub fn build_sdiv(&mut self, lhs: LLVMValueRef, rhs: LLVMValueRef,
+                      name: &str) -> LLVMValueRef {
+        let c_name = CString::new(name).unwrap();
+        unsafe {
+            llvm::LLVMBuildSDiv(self.builder, lhs, rhs, c_name.as_ptr())
+        }
+    }
+
+    pub fn build_icmp(&mut self, op: LLVMIntPredicate, lhs: LLVMValueRef, rhs: LLVMValueRef,
+                      name: &str) -> LLVMValueRef {
+        let c_name = CString::new(name).unwrap();
+        unsafe {
+            llvm::LLVMBuildICmp(self.builder, op, lhs, rhs, c_name.as_ptr())
         }
     }
 
