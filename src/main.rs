@@ -225,7 +225,8 @@ impl Literal {
                 let i32_ty = ctxt.context.int32_type(); // TODO: Can I reuse this?
                 let indices = vec![llvm::const_int(i32_ty, 0, false),
                                    llvm::const_int(i32_ty, 0, false)];
-                let ptr = ctxt.builder.build_global_string(s, "str1"); // TODO
+                let ptr = ctxt.builder.build_global_string(s, &format!("str{}", ctxt.str_count));
+                ctxt.str_count += 1;
                 ctxt.builder.build_in_bounds_gep(ptr, indices, "str1")
             }
         }
