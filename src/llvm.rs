@@ -116,6 +116,7 @@ impl Drop for Context {
     }
 }
 
+// No `Drop` impl is needed as this is disposed of when the associated context is disposed
 pub struct Module {
     pub module: LLVMModuleRef
 }
@@ -144,14 +145,6 @@ impl Module {
             None
         } else {
             Some(res)
-        }
-    }
-}
-
-impl Drop for Module {
-    fn drop(&mut self) {
-        unsafe {
-            //TODO: llvm::LLVMDisposeModule(self.module);
         }
     }
 }

@@ -14,7 +14,6 @@ mod llvm;
 use llvm_sys::LLVMIntPredicate::*;
 use llvm::Ctxt;
 use lang::program;
-use llvm_sys::core::*;
 use llvm_sys::prelude::*;
 use llvm_sys::target_machine::*;
 use BinOp::{AddOp, SubOp, MulOp, DivOp, LessOp, GreaterOp, EqualsOp};
