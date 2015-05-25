@@ -1,3 +1,5 @@
+extern crate libc;
+
 use std::collections::HashMap;
 use std::ffi::{CString, CStr};
 
@@ -335,10 +337,11 @@ pub fn print_module_to_file(module: &Module, path: &str) -> Result<(), &'static 
     }
 }
 
-// TODO: Lifetime of &str
-pub fn print_module_to_string<'a>(module: &'a Module) -> &'a str {
+pub fn print_module_to_string<'a>(module: &'a Module) -> String {
     unsafe {
-        c_str_to_str!(llvm::LLVMPrintModuleToString(module.module))
+        let c_str = llvm::LLVMPrintModuleToString(module.module);
+        let len = libc::strlen(c_str);
+        String::from_raw_parts(c_str as *mut u8, (len + 1) as usize, (len + 1) as usize)
     }
 }
 
