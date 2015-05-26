@@ -196,7 +196,7 @@ impl Stmt {
                 ctxt.builder.build_store(expr_res, val);
             }
             &Stmt::IfStmt(ref cond, ref then_block, ref maybe_else_block) => {
-                let func = ctxt.cur_func.unwrap(); // TODO
+                let func = ctxt.cur_func.unwrap();
                 let cond_res = cond.gen(ctxt);
                 let then_bb = ctxt.context.append_basic_block(func, "if.then");
                 let maybe_else_bb = if maybe_else_block.is_some() {
@@ -221,7 +221,24 @@ impl Stmt {
 
                 ctxt.builder.position_at_end(end_bb);
             }
-            _ => unimplemented!()
+            &Stmt::WhileStmt(ref cond, ref block) => {
+                let func = ctxt.cur_func.unwrap();
+                let cond_bb = ctxt.context.append_basic_block(func, "while.cond");
+                let body_bb = ctxt.context.append_basic_block(func, "while.body");
+                let end_bb = ctxt.context.append_basic_block(func, "while.end");
+
+                ctxt.builder.build_br(cond_bb);
+
+                ctxt.builder.position_at_end(cond_bb);
+                let cond_res = cond.gen(ctxt);
+                ctxt.builder.build_cond_br(cond_res, body_bb, end_bb);
+
+                ctxt.builder.position_at_end(body_bb);
+                block.gen(ctxt);
+                ctxt.builder.build_br(cond_bb);
+
+                ctxt.builder.position_at_end(end_bb);
+            }
         };
     }
 }
