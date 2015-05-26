@@ -94,6 +94,8 @@ impl Function {
         assert_eq!(ctxt.named_values.len(), 0);
 
         let func = self.decl.gen(ctxt);
+        assert_eq!(ctxt.cur_func, None);
+        ctxt.cur_func = Some(func);
 
         let basic_block = ctxt.context.append_basic_block(func, "entry");
         ctxt.builder.position_at_end(basic_block);
@@ -104,6 +106,7 @@ impl Function {
         }
 
         ctxt.named_values.clear();
+        ctxt.cur_func = None;
     }
 }
 
@@ -180,17 +183,43 @@ impl Stmt {
                 let ptr = ctxt.builder.build_alloca(ty, &var.name);
                 ctxt.named_values.insert(var.name.clone(), ptr);
                 let expr_res = e.gen(ctxt);
-                ctxt.builder.build_store(expr_res, ptr)
+                ctxt.builder.build_store(expr_res, ptr);
             }
-            &Stmt::ExprStmt(ref e) => e.gen(ctxt),
+            &Stmt::ExprStmt(ref e) => { e.gen(ctxt); },
             &Stmt::ReturnStmt(ref e) => {
                 let expr_res = e.gen(ctxt);
-                ctxt.builder.build_ret(expr_res)
+                ctxt.builder.build_ret(expr_res);
             }
             &Stmt::AssignStmt(ref var_name, ref e) => {
                 let val = ctxt.named_values.get(var_name).expect("Variable not found").clone();
                 let expr_res = e.gen(ctxt);
-                ctxt.builder.build_store(expr_res, val)
+                ctxt.builder.build_store(expr_res, val);
+            }
+            &Stmt::IfStmt(ref cond, ref then_block, ref maybe_else_block) => {
+                let func = ctxt.cur_func.unwrap(); // TODO
+                let cond_res = cond.gen(ctxt);
+                let then_bb = ctxt.context.append_basic_block(func, "if.then");
+                let maybe_else_bb = if maybe_else_block.is_some() {
+                    Some(ctxt.context.append_basic_block(func, "if.else"))
+                } else {
+                    None
+                };
+                let end_bb = ctxt.context.append_basic_block(func, "if.end");
+
+                if let (&Some(ref else_block), Some(else_bb)) = (maybe_else_block, maybe_else_bb) {
+                    ctxt.builder.build_cond_br(cond_res, then_bb, else_bb);
+                    ctxt.builder.position_at_end(else_bb);
+                    else_block.gen(ctxt);
+                    ctxt.builder.build_br(end_bb);
+                } else {
+                    ctxt.builder.build_cond_br(cond_res, then_bb, end_bb);
+                }
+
+                ctxt.builder.position_at_end(then_bb);
+                then_block.gen(ctxt);
+                ctxt.builder.build_br(end_bb);
+
+                ctxt.builder.position_at_end(end_bb);
             }
             _ => unimplemented!()
         };
@@ -226,6 +255,7 @@ impl Literal {
                 let indices = vec![llvm::const_int(i32_ty, 0, false),
                                    llvm::const_int(i32_ty, 0, false)];
                 let ptr = ctxt.builder.build_global_string(s, "str");
+                // TODO: What is the name argument for?
                 ctxt.builder.build_in_bounds_gep(ptr, indices, "str")
             }
         }

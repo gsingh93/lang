@@ -14,6 +14,7 @@ pub struct Ctxt {
     pub module: Module,
     pub builder: Builder,
     pub named_values: HashMap<String, LLVMValueRef>,
+    pub cur_func: Option<LLVMValueRef>
 }
 
 impl Ctxt {
@@ -25,7 +26,8 @@ impl Ctxt {
             context: context,
             module: module,
             builder: builder,
-            named_values: HashMap::new()
+            named_values: HashMap::new(),
+            cur_func: None
         }
     }
 }
@@ -254,6 +256,20 @@ impl Builder {
                                        indices.len() as u32, c_name.as_ptr())
         }
     }
+
+    pub fn build_cond_br(&self, cond: LLVMValueRef, then: LLVMBasicBlockRef,
+                         else_: LLVMBasicBlockRef) -> LLVMValueRef {
+        unsafe {
+            llvm::LLVMBuildCondBr(self.builder, cond, then, else_)
+        }
+    }
+
+    pub fn build_br(&self, dest: LLVMBasicBlockRef) -> LLVMValueRef {
+        unsafe {
+            llvm::LLVMBuildBr(self.builder, dest)
+        }
+    }
+
 }
 
 impl Drop for Builder {
