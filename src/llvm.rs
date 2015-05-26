@@ -14,7 +14,6 @@ pub struct Ctxt {
     pub module: Module,
     pub builder: Builder,
     pub named_values: HashMap<String, LLVMValueRef>,
-    pub str_count: usize
 }
 
 impl Ctxt {
@@ -26,8 +25,7 @@ impl Ctxt {
             context: context,
             module: module,
             builder: builder,
-            named_values: HashMap::new(),
-            str_count: 0
+            named_values: HashMap::new()
         }
     }
 }

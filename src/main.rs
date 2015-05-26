@@ -222,12 +222,11 @@ impl Literal {
                 llvm::const_int(ty, *n as u64, false)
             }
             &Literal::StrLit(ref s) => {
-                let i32_ty = ctxt.context.int32_type(); // TODO: Can I reuse this?
+                let i32_ty = ctxt.context.int32_type();
                 let indices = vec![llvm::const_int(i32_ty, 0, false),
                                    llvm::const_int(i32_ty, 0, false)];
-                let ptr = ctxt.builder.build_global_string(s, &format!("str{}", ctxt.str_count));
-                ctxt.str_count += 1;
-                ctxt.builder.build_in_bounds_gep(ptr, indices, "str1")
+                let ptr = ctxt.builder.build_global_string(s, "str");
+                ctxt.builder.build_in_bounds_gep(ptr, indices, "str")
             }
         }
     }
