@@ -11,12 +11,23 @@ extern crate log;
 
 mod llvm;
 
-use llvm_sys::LLVMIntPredicate::*;
-use llvm::Ctxt;
 use lang::program;
-use llvm_sys::prelude::*;
-use llvm_sys::target_machine::*;
+
+use CheckError::{TypeMismatch, RetTypeMismatch, VoidUsedInEquality, ReturnInVoidFunction,
+                 MissingReturn};
+use ResolveError::{DuplicateFunction, DuplicateVariable, UndefinedIdentifier};
+
+
 use BinOp::{AddOp, SubOp, MulOp, DivOp, LessOp, GreaterOp, EqualsOp};
+use Stmt::{IfStmt, WhileStmt, ReturnStmt, ExprStmt, AssignStmt, DeclStmt};
+use Type::{VoidTy, IntTy, StringTy, BoolTy, UserTy};
+use Expr::{LitExpr, BinExpr, EmptyExpr, IdentExpr, FuncCallExpr};
+use Literal::{NumLit, BoolLit, StrLit};
+
+use llvm_sys::prelude::{LLVMValueRef, LLVMTypeRef};
+use llvm_sys::LLVMIntPredicate::{LLVMIntSLT, LLVMIntSGT, LLVMIntEQ};
+use llvm_sys::target_machine::{LLVMCodeGenFileType, LLVMCodeGenOptLevel, LLVMRelocMode,
+                               LLVMCodeModel};
 
 use getopts::Options;
 
@@ -24,8 +35,80 @@ use std::env;
 use std::fs::File;
 use std::io::Read;
 use std::path::Path;
+use std::collections::{HashMap, HashSet};
 
 peg_file! lang("grammar.rustpeg");
+
+#[derive(Debug)]
+enum ResolveError {
+    DuplicateFunction,
+    DuplicateVariable,
+    UndefinedIdentifier
+}
+
+struct ResolveCtxt {
+    vars: HashMap<String, Type>,
+    funcs: HashMap<String, Type>,
+    errors: Vec<ResolveError>
+}
+
+impl ResolveCtxt {
+    fn new() -> Self {
+        ResolveCtxt { vars: HashMap::new(), funcs: HashMap::new(), errors: Vec::new() }
+    }
+
+    fn add_error(&mut self, e: ResolveError) {
+        self.errors.push(e)
+    }
+}
+
+#[derive(Debug)]
+enum CheckError {
+    TypeMismatch(Type, Type),
+    RetTypeMismatch(Type, Type),
+    VoidUsedInEquality,
+    ReturnInVoidFunction,
+    MissingReturn
+}
+
+struct CheckCtxt {
+    vars: HashMap<String, Type>,
+    funcs: HashMap<String, Type>,
+    errors: Vec<CheckError>
+}
+
+impl CheckCtxt {
+    fn new(vars: HashMap<String, Type>, funcs: HashMap<String, Type>) -> Self {
+        CheckCtxt { vars: vars, funcs: funcs, errors: Vec::new() }
+    }
+
+    fn add_error(&mut self, e: CheckError) {
+        self.errors.push(e)
+    }
+}
+
+struct GenCtxt {
+    context: llvm::Context,
+    module: llvm::Module,
+    builder: llvm::Builder,
+    named_values: HashMap<String, LLVMValueRef>,
+    cur_func: Option<LLVMValueRef>
+}
+
+impl GenCtxt {
+    pub fn new(module_name: &str) -> Self {
+        let context = llvm::Context::new();
+        let module = context.module_create_with_name(module_name);
+        let builder = context.create_builder();
+        GenCtxt {
+            context: context,
+            module: module,
+            builder: builder,
+            named_values: HashMap::new(),
+            cur_func: None
+        }
+    }
+}
 
 #[derive(Debug, Eq, PartialEq, RustcDecodable, RustcEncodable)]
 pub struct Program {
@@ -34,7 +117,29 @@ pub struct Program {
 }
 
 impl Program {
-    fn gen(&self, ctxt: &mut Ctxt) {
+    fn resolve(&self, ctxt: &mut ResolveCtxt) {
+        // Make sure there are no duplicate functions
+        for decl in self.extern_decls.iter() {
+            decl.resolve(ctxt);
+        }
+        for func in self.fns.iter() {
+            func.decl.resolve(ctxt);
+        }
+
+        if ctxt.errors.is_empty() {
+            for func in self.fns.iter() {
+                // TODO: func.resolve(ctxt);
+            }
+        }
+    }
+
+    fn check(&self, ctxt: &mut CheckCtxt) {
+        for func in self.fns.iter() {
+            func.check(ctxt);
+        }
+    }
+
+    fn gen(&self, ctxt: &mut GenCtxt) {
         for decl in self.extern_decls.iter() {
             decl.gen(ctxt);
         }
@@ -52,7 +157,11 @@ struct ExternDecl {
 }
 
 impl ExternDecl {
-    fn gen(&self, ctxt: &mut Ctxt) {
+    fn resolve(&self, ctxt: &mut ResolveCtxt) {
+        self.decl.resolve(ctxt);
+    }
+
+    fn gen(&self, ctxt: &mut GenCtxt) {
         self.decl.gen(ctxt);
     }
 }
@@ -65,7 +174,15 @@ struct FnDecl {
 }
 
 impl FnDecl {
-    fn gen(&self, ctxt: &mut Ctxt) -> LLVMValueRef {
+    fn resolve(&self, ctxt: &mut ResolveCtxt) {
+        if ctxt.funcs.contains_key(&self.name) {
+            ctxt.add_error(DuplicateFunction);
+        } else {
+            ctxt.funcs.insert(self.name.clone(), self.ty);
+        }
+    }
+
+    fn gen(&self, ctxt: &mut GenCtxt) -> LLVMValueRef {
         let ret_ty = self.ty.gen_type(ctxt);
         let param_types = self.args.gen_types(ctxt);
         let func_ty = llvm::function_type(ret_ty, param_types, false);
@@ -90,7 +207,12 @@ struct Function {
 }
 
 impl Function {
-    fn gen(&self, ctxt: &mut Ctxt) {
+    fn check(&self, ctxt: &mut CheckCtxt) {
+        ctxt.funcs.insert(self.decl.name.clone(), self.decl.ty);
+        self.block.check(ctxt, self.decl.ty);
+    }
+
+    fn gen(&self, ctxt: &mut GenCtxt) {
         assert_eq!(ctxt.named_values.len(), 0);
 
         let func = self.decl.gen(ctxt);
@@ -116,7 +238,7 @@ struct ArgList {
 }
 
 impl ArgList {
-    fn gen_types(&self, ctxt: &mut Ctxt) -> Vec<LLVMTypeRef> {
+    fn gen_types(&self, ctxt: &mut GenCtxt) -> Vec<LLVMTypeRef> {
         let mut types = Vec::with_capacity(self.args.len());
         for var in self.args.iter() {
             types.push(var.ty.gen_type(ctxt));
@@ -131,17 +253,17 @@ struct Variable {
     name: String
 }
 
-#[derive(Debug, Eq, PartialEq, RustcDecodable, RustcEncodable)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, RustcDecodable, RustcEncodable)]
 enum Type {
     IntTy,
     StringTy,
     VoidTy,
     BoolTy,
-    UserTy(String)
+    UserTy
 }
 
 impl Type {
-    fn gen_type(&self, ctxt: &mut Ctxt) -> LLVMTypeRef {
+    fn gen_type(&self, ctxt: &mut GenCtxt) -> LLVMTypeRef {
         match self {
             &Type::IntTy => ctxt.context.int32_type(),
             &Type::StringTy => llvm::pointer_type(ctxt.context.int8_type(), 0),
@@ -158,7 +280,22 @@ struct Block {
 }
 
 impl Block {
-    fn gen(&self, ctxt: &mut Ctxt) {
+    fn check(&self, ctxt: &mut CheckCtxt, ret_type: Type) {
+        let mut has_return = false;
+        for stmt in self.stmts.iter() {
+            if let &ReturnStmt(_) = stmt {
+                has_return = true;
+            }
+            stmt.check(ctxt, ret_type);
+        }
+        if ret_type == VoidTy && has_return {
+            ctxt.add_error(ReturnInVoidFunction);
+        } else if ret_type != VoidTy && !has_return {
+            ctxt.add_error(MissingReturn);
+        }
+    }
+
+    fn gen(&self, ctxt: &mut GenCtxt) {
         for stmt in self.stmts.iter() {
             stmt.gen(ctxt);
         }
@@ -176,26 +313,78 @@ enum Stmt {
 }
 
 impl Stmt {
-    fn gen(&self, ctxt: &mut Ctxt) {
+    fn check(&self, ctxt: &mut CheckCtxt, ret_type: Type) {
         match self {
-            &Stmt::DeclStmt(ref var, ref e) => {
+            &DeclStmt(ref var, ref e) => {
+                ctxt.vars.insert(var.name.clone(), var.ty);
+
+                if let Some(res) = e.check(ctxt) {
+                    if var.ty != res {
+                        ctxt.add_error(TypeMismatch(var.ty, res));
+                    }
+                }
+            }
+            &ExprStmt(ref e) => { e.check(ctxt); },
+            &ReturnStmt(ref e) => {
+                if let Some(res) = e.check(ctxt) {
+                    if ret_type != VoidTy && ret_type != res {
+                        ctxt.add_error(RetTypeMismatch(ret_type, res));
+                    }
+                }
+            }
+            &AssignStmt(ref var_name, ref e) => {
+                let ty = match ctxt.vars.get(var_name) {
+                    Some(ty) => *ty,
+                    None => unreachable!()
+                };
+                if let Some(res) = e.check(ctxt) {
+                    if ty != res {
+                        ctxt.add_error(TypeMismatch(ty, res));
+                    }
+                }
+            },
+            &IfStmt(ref cond, ref then_block, ref maybe_else_block) => {
+                if let Some(res) = cond.check(ctxt) {
+                    if res != BoolTy {
+                        ctxt.add_error(TypeMismatch(BoolTy, res));
+                    }
+                }
+                then_block.check(ctxt, ret_type);
+                if let &Some(ref else_block) = maybe_else_block {
+                    else_block.check(ctxt, ret_type);
+                }
+            },
+            &WhileStmt(ref cond, ref body) => {
+                if let Some(res) = cond.check(ctxt) {
+                    if res != BoolTy {
+                        ctxt.add_error(TypeMismatch(BoolTy, res));
+                    }
+                }
+                body.check(ctxt, ret_type);
+            }
+        }
+    }
+
+    fn gen(&self, ctxt: &mut GenCtxt) {
+        match self {
+            &DeclStmt(ref var, ref e) => {
                 let ty = var.ty.gen_type(ctxt);
                 let ptr = ctxt.builder.build_alloca(ty, &var.name);
                 ctxt.named_values.insert(var.name.clone(), ptr);
                 let expr_res = e.gen(ctxt);
                 ctxt.builder.build_store(expr_res, ptr);
             }
-            &Stmt::ExprStmt(ref e) => { e.gen(ctxt); },
-            &Stmt::ReturnStmt(ref e) => {
+            &ExprStmt(ref e) => { e.gen(ctxt); },
+            &ReturnStmt(ref e) => {
                 let expr_res = e.gen(ctxt);
                 ctxt.builder.build_ret(expr_res);
             }
-            &Stmt::AssignStmt(ref var_name, ref e) => {
+            &AssignStmt(ref var_name, ref e) => {
                 let val = ctxt.named_values.get(var_name).expect("Variable not found").clone();
                 let expr_res = e.gen(ctxt);
                 ctxt.builder.build_store(expr_res, val);
             }
-            &Stmt::IfStmt(ref cond, ref then_block, ref maybe_else_block) => {
+            &IfStmt(ref cond, ref then_block, ref maybe_else_block) => {
                 let func = ctxt.cur_func.unwrap();
                 let cond_res = cond.gen(ctxt);
                 let then_bb = ctxt.context.append_basic_block(func, "if.then");
@@ -221,7 +410,7 @@ impl Stmt {
 
                 ctxt.builder.position_at_end(end_bb);
             }
-            &Stmt::WhileStmt(ref cond, ref block) => {
+            &WhileStmt(ref cond, ref block) => {
                 let func = ctxt.cur_func.unwrap();
                 let cond_bb = ctxt.context.append_basic_block(func, "while.cond");
                 let body_bb = ctxt.context.append_basic_block(func, "while.body");
@@ -260,14 +449,14 @@ enum Literal {
 }
 
 impl Literal {
-    fn gen(&self, ctxt: &mut Ctxt) -> LLVMValueRef {
+    fn gen(&self, ctxt: &mut GenCtxt) -> LLVMValueRef {
         match self {
-            &Literal::BoolLit(b) => ctxt.context.const_bool(b),
-            &Literal::NumLit(ref n) => {
+            &BoolLit(b) => ctxt.context.const_bool(b),
+            &NumLit(ref n) => {
                 let ty = ctxt.context.int32_type();
                 llvm::const_int(ty, *n as u64, false)
             }
-            &Literal::StrLit(ref s) => {
+            &StrLit(ref s) => {
                 let i32_ty = ctxt.context.int32_type();
                 let indices = vec![llvm::const_int(i32_ty, 0, false),
                                    llvm::const_int(i32_ty, 0, false)];
@@ -280,10 +469,79 @@ impl Literal {
 }
 
 impl Expr {
-    fn gen(&self, ctxt: &mut Ctxt) -> LLVMValueRef {
+    fn check(&self, ctxt: &mut CheckCtxt) -> Option<Type> {
         match self {
-            &Expr::LitExpr(ref lit) => lit.gen(ctxt),
-            &Expr::BinExpr(ref l, op, ref r) => {
+            &LitExpr(ref lit) => match lit {
+                &BoolLit(_) => Some(BoolTy),
+                &NumLit(_) => Some(IntTy),
+                &StrLit(_) => Some(StringTy)
+            },
+            &BinExpr(ref l, op, ref r) => {
+                let maybe_left = l.check(ctxt);
+                let maybe_right = r.check(ctxt);
+
+                if let (Some(left), Some(right)) = (maybe_left, maybe_right) {
+                    // Currently we don't have to return an Option because we always know what type
+                    // should be returned, even if the type checking fails. However, this
+                    // future-proofs the code if we ever decide to allow operations between
+                    // different types which end up having different return types
+                    match op {
+                        AddOp | SubOp | MulOp | DivOp => {
+                            if left != IntTy {
+                                ctxt.add_error(TypeMismatch(IntTy, left));
+                            }
+                            if right != IntTy {
+                                ctxt.add_error(TypeMismatch(IntTy, right));
+                            }
+
+                            if left != IntTy || right != IntTy {
+                                None
+                            } else {
+                                Some(IntTy)
+                            }
+                        }
+                        LessOp | GreaterOp => {
+                            if left != IntTy {
+                                ctxt.add_error(TypeMismatch(IntTy, left));
+                            }
+                            if right != IntTy {
+                                ctxt.add_error(TypeMismatch(IntTy, right));
+                            }
+
+                            if left != IntTy || right != IntTy {
+                                None
+                            } else {
+                                Some(BoolTy)
+                            }
+                        }
+                        EqualsOp => {
+                            if left == VoidTy || right == VoidTy {
+                                ctxt.add_error(VoidUsedInEquality);
+                                None
+                            } else {
+                                if left != right {
+                                    ctxt.add_error(TypeMismatch(left, right));
+                                    None
+                                } else {
+                                    Some(BoolTy)
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    None
+                }
+            }
+            &IdentExpr(ref name) => unimplemented!(),
+            &FuncCallExpr(ref name, ref args) => unimplemented!(),
+            &EmptyExpr => None
+        }
+    }
+
+    fn gen(&self, ctxt: &mut GenCtxt) -> LLVMValueRef {
+        match self {
+            &LitExpr(ref lit) => lit.gen(ctxt),
+            &BinExpr(ref l, op, ref r) => {
                 let left = l.gen(ctxt);
                 let right = r.gen(ctxt);
                 match op {
@@ -296,11 +554,11 @@ impl Expr {
                     EqualsOp => ctxt.builder.build_icmp(LLVMIntEQ, left, right, "eq")
                 }
             }
-            &Expr::IdentExpr(ref name) => {
+            &IdentExpr(ref name) => {
                 let ptr = ctxt.named_values.get(name).expect("Variable not found").clone();
                 ctxt.builder.build_load(ptr, name)
             },
-            &Expr::FuncCallExpr(ref func_name, ref arg_exprs) => {
+            &FuncCallExpr(ref func_name, ref arg_exprs) => {
                 let func = ctxt.module.get_named_function(func_name).unwrap();
                 let args: Vec<_> = arg_exprs.iter().map(|e| e.gen(ctxt)).collect();
                 ctxt.builder.build_call(func, args, func_name)
@@ -428,17 +686,32 @@ fn main() {
     debug!("Configuration: {:?}", config);
 
     let ast = construct_ast(&config.input_filename);
-    let mut context = Ctxt::new("main");
+    let mut resolve_context = ResolveCtxt::new();
+    ast.resolve(&mut resolve_context);
+    if !resolve_context.errors.is_empty() {
+        println!("{:?}", resolve_context.errors);
+        return;
+    }
 
+    let ResolveCtxt { vars, funcs, .. } = resolve_context;
+    let mut check_context = CheckCtxt::new(vars, funcs);
+    ast.check(&mut check_context);
+
+    if !check_context.errors.is_empty() {
+        println!("{:?}", check_context.errors);
+        return;
+    }
 
     if config.output_type == OutputType::AST {
         println!("{:?}", ast)
     } else if config.output_type == OutputType::LLVM {
+        let mut context = GenCtxt::new("main");
         ast.gen(&mut context);
         llvm::print_module_to_file(&context.module,
                                    config.output_filename.as_ref().unwrap()).unwrap();
         // TODO: stdout: println!("{}", llvm::print_module_to_string(&context.module));
     } else {
+        let mut context = GenCtxt::new("main");
         ast.gen(&mut context);
         let file_type = match config.output_type {
             OutputType::Assembly => LLVMCodeGenFileType::LLVMAssemblyFile,

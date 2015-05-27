@@ -30,7 +30,7 @@ function -> Function
 
 type -> Type
     = "int" __ { IntTy } / "string" __ { StringTy } / "bool" __ { BoolTy } / "void" __ { VoidTy }
-    / name:ident { UserTy(name) }
+    / name:ident { UserTy }
 
 variable -> Variable
     = ty:type name:ident { Variable { ty: ty, name: name } }

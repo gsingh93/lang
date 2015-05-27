@@ -1,6 +1,5 @@
 extern crate libc;
 
-use std::collections::HashMap;
 use std::ffi::{CString, CStr};
 
 use llvm_sys::*;
@@ -8,29 +7,6 @@ use llvm_sys::prelude::*;
 use llvm_sys::target_machine::*;
 use llvm_sys::target::*;
 use llvm_sys::core as llvm;
-
-pub struct Ctxt {
-    pub context: Context,
-    pub module: Module,
-    pub builder: Builder,
-    pub named_values: HashMap<String, LLVMValueRef>,
-    pub cur_func: Option<LLVMValueRef>
-}
-
-impl Ctxt {
-    pub fn new(module_name: &str) -> Self {
-        let context = Context::new();
-        let module = context.module_create_with_name(module_name);
-        let builder = context.create_builder();
-        Ctxt {
-            context: context,
-            module: module,
-            builder: builder,
-            named_values: HashMap::new(),
-            cur_func: None
-        }
-    }
-}
 
 macro_rules! c_str_to_str {
     ($s:expr) => {
