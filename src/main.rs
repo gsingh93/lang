@@ -14,7 +14,7 @@ use lang::program;
 
 use CheckError::{TypeMismatch, RetTypeMismatch, VoidUsedInEquality, ReturnInVoidFunction,
                  MissingReturn, ArgLenMismatch};
-use ResolveError::{DuplicateFunction, DuplicateVariable, UndefinedIdentifier};
+use ResolveError::{MissingMain, DuplicateFunction, DuplicateVariable, UndefinedIdentifier};
 
 
 use BinOp::{AddOp, SubOp, MulOp, DivOp, LessOp, GreaterOp, EqualsOp};
@@ -40,6 +40,7 @@ peg_file! lang("grammar.rustpeg");
 
 #[derive(Debug)]
 enum ResolveError {
+    MissingMain,
     DuplicateFunction,
     DuplicateVariable,
     UndefinedIdentifier
@@ -124,6 +125,11 @@ impl Program {
         }
         for func in self.fns.iter() {
             func.decl.resolve(ctxt);
+        }
+
+        if !ctxt.funcs.contains_key("main") {
+            ctxt.add_error(MissingMain);
+            return;
         }
 
         if ctxt.errors.is_empty() {
