@@ -13,7 +13,7 @@ extern crate log;
 use lang::program;
 
 use CheckError::{TypeMismatch, RetTypeMismatch, VoidUsedInEquality, ReturnInVoidFunction,
-                 MissingReturn};
+                 MissingReturn, ArgLenMismatch};
 use ResolveError::{DuplicateFunction, DuplicateVariable, UndefinedIdentifier};
 
 
@@ -47,7 +47,7 @@ enum ResolveError {
 
 struct ResolveCtxt {
     vars: HashMap<String, Type>,
-    funcs: HashMap<String, Type>,
+    funcs: HashMap<String, FnDecl>,
     errors: Vec<ResolveError>
 }
 
@@ -67,17 +67,18 @@ enum CheckError {
     RetTypeMismatch(Type, Type),
     VoidUsedInEquality,
     ReturnInVoidFunction,
-    MissingReturn
+    MissingReturn,
+    ArgLenMismatch(usize, usize)
 }
 
 struct CheckCtxt {
     vars: HashMap<String, Type>,
-    funcs: HashMap<String, Type>,
+    funcs: HashMap<String, FnDecl>,
     errors: Vec<CheckError>
 }
 
 impl CheckCtxt {
-    fn new(vars: HashMap<String, Type>, funcs: HashMap<String, Type>) -> Self {
+    fn new(vars: HashMap<String, Type>, funcs: HashMap<String, FnDecl>) -> Self {
         CheckCtxt { vars: vars, funcs: funcs, errors: Vec::new() }
     }
 
@@ -165,7 +166,7 @@ impl ExternDecl {
     }
 }
 
-#[derive(Debug, Eq, PartialEq, RustcDecodable, RustcEncodable)]
+#[derive(Clone, Debug, Eq, PartialEq, RustcDecodable, RustcEncodable)]
 struct FnDecl {
     ty: Type,
     name: String,
@@ -177,7 +178,7 @@ impl FnDecl {
         if ctxt.funcs.contains_key(&self.name) {
             ctxt.add_error(DuplicateFunction);
         } else {
-            ctxt.funcs.insert(self.name.clone(), self.ty);
+            ctxt.funcs.insert(self.name.clone(), self.clone());
         }
     }
 
@@ -207,7 +208,7 @@ struct Function {
 
 impl Function {
     fn check(&self, ctxt: &mut CheckCtxt) {
-        ctxt.funcs.insert(self.decl.name.clone(), self.decl.ty);
+        ctxt.funcs.insert(self.decl.name.clone(), self.decl.clone());
         self.block.check(ctxt, self.decl.ty);
     }
 
@@ -231,7 +232,7 @@ impl Function {
     }
 }
 
-#[derive(Debug, Eq, PartialEq, RustcDecodable, RustcEncodable)]
+#[derive(Clone, Debug, Eq, PartialEq, RustcDecodable, RustcEncodable)]
 struct ArgList {
     args: Vec<Variable>
 }
@@ -246,7 +247,7 @@ impl ArgList {
     }
 }
 
-#[derive(Debug, Eq, PartialEq, RustcDecodable, RustcEncodable)]
+#[derive(Clone, Debug, Eq, PartialEq, RustcDecodable, RustcEncodable)]
 struct Variable {
     ty: Type,
     name: String
@@ -531,9 +532,24 @@ impl Expr {
                     None
                 }
             }
-            &IdentExpr(ref name) => unimplemented!(),
-            &FuncCallExpr(ref name, ref args) => unimplemented!(),
-            &EmptyExpr => None
+            &IdentExpr(ref name) => Some(*ctxt.vars.get(name).unwrap()),
+            &FuncCallExpr(ref name, ref args) => {
+                let decl = ctxt.funcs.get(name).unwrap().clone();
+                if decl.args.args.len() != args.len() {
+                    // TODO: Should this go in resolve?
+                    ctxt.add_error(ArgLenMismatch(decl.args.args.len(), args.len()));
+                } else {
+                    for (var, arg) in decl.args.args.iter().zip(args.iter()) {
+                        if let Some(ty) = arg.check(ctxt) {
+                            if var.ty != ty {
+                                ctxt.add_error(TypeMismatch(var.ty, ty));
+                            }
+                        }
+                    }
+                }
+                Some(decl.ty)
+            }
+            &EmptyExpr => unreachable!()
         }
     }
 
