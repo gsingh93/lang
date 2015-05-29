@@ -2,14 +2,13 @@
 #![plugin(peg_syntax_ext)]
 
 extern crate llvm_sys;
+extern crate llvm;
 extern crate getopts;
 extern crate rustc_serialize;
 extern crate env_logger;
 
 #[macro_use]
 extern crate log;
-
-mod llvm;
 
 use lang::program;
 
