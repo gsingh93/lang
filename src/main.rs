@@ -217,7 +217,10 @@ impl Function {
     }
 
     fn check(&self, ctxt: &mut CheckCtxt) {
-        self.block.check(ctxt, self.decl.ty);
+        let has_return = self.block.check(ctxt, self.decl.ty);
+        if self.decl.ty != VoidTy && !has_return {
+            ctxt.add_error(MissingReturn);
+        }
     }
 
     fn gen(&self, ctxt: &mut GenCtxt) {
@@ -294,7 +297,7 @@ impl Block {
         }
     }
 
-    fn check(&self, ctxt: &mut CheckCtxt, ret_type: Type) {
+    fn check(&self, ctxt: &mut CheckCtxt, ret_type: Type) -> bool {
         let mut has_return = false;
         for stmt in self.stmts.iter() {
             if let &ReturnStmt(_) = stmt {
@@ -302,11 +305,7 @@ impl Block {
             }
             stmt.check(ctxt, ret_type);
         }
-        if ret_type == VoidTy && has_return {
-            ctxt.add_error(ReturnInVoidFunction);
-        } else if ret_type != VoidTy && !has_return {
-            ctxt.add_error(MissingReturn);
-        }
+        has_return
     }
 
     fn gen(&self, ctxt: &mut GenCtxt) {
@@ -372,6 +371,10 @@ impl Stmt {
             }
             &ExprStmt(ref e) => { e.check(ctxt); },
             &ReturnStmt(ref e) => {
+                if ret_type == VoidTy {
+                    ctxt.add_error(ReturnInVoidFunction);
+                }
+
                 if let Some(res) = e.check(ctxt) {
                     if ret_type != VoidTy && ret_type != res {
                         ctxt.add_error(RetTypeMismatch(ret_type, res));
@@ -507,7 +510,7 @@ impl Literal {
                 let indices = vec![llvm::const_int(i32_ty, 0, false),
                                    llvm::const_int(i32_ty, 0, false)];
                 let ptr = ctxt.builder.build_global_string(s, "str");
-                // TODO: What is the name argument for?
+                // The name argument here is not used since this is a constant
                 ctxt.builder.build_in_bounds_gep(ptr, indices, "str")
             }
         }
