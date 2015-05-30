@@ -34,16 +34,16 @@ use std::env;
 use std::fs::File;
 use std::io::Read;
 use std::path::Path;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 peg_file! lang("grammar.rustpeg");
 
 #[derive(Debug)]
 enum ResolveError {
     MissingMain,
-    DuplicateFunction,
-    DuplicateVariable,
-    UndefinedIdentifier
+    DuplicateFunction(String),
+    DuplicateVariable(String),
+    UndefinedIdentifier(String)
 }
 
 struct ResolveCtxt {
@@ -129,12 +129,11 @@ impl Program {
 
         if !ctxt.funcs.contains_key("main") {
             ctxt.add_error(MissingMain);
-            return;
         }
 
         if ctxt.errors.is_empty() {
             for func in self.fns.iter() {
-                // TODO: func.resolve(ctxt);
+                func.resolve(ctxt);
             }
         }
     }
@@ -182,7 +181,7 @@ struct FnDecl {
 impl FnDecl {
     fn resolve(&self, ctxt: &mut ResolveCtxt) {
         if ctxt.funcs.contains_key(&self.name) {
-            ctxt.add_error(DuplicateFunction);
+            ctxt.add_error(DuplicateFunction(self.name.clone()));
         } else {
             ctxt.funcs.insert(self.name.clone(), self.clone());
         }
@@ -213,8 +212,11 @@ struct Function {
 }
 
 impl Function {
+    fn resolve(&self, ctxt: &mut ResolveCtxt) {
+        self.block.resolve(ctxt);
+    }
+
     fn check(&self, ctxt: &mut CheckCtxt) {
-        ctxt.funcs.insert(self.decl.name.clone(), self.decl.clone());
         self.block.check(ctxt, self.decl.ty);
     }
 
@@ -286,6 +288,12 @@ struct Block {
 }
 
 impl Block {
+    fn resolve(&self, ctxt: &mut ResolveCtxt) {
+        for stmt in self.stmts.iter() {
+            stmt.resolve(ctxt);
+        }
+    }
+
     fn check(&self, ctxt: &mut CheckCtxt, ret_type: Type) {
         let mut has_return = false;
         for stmt in self.stmts.iter() {
@@ -319,6 +327,38 @@ enum Stmt {
 }
 
 impl Stmt {
+    fn resolve(&self, ctxt: &mut ResolveCtxt) {
+        match self {
+            &DeclStmt(ref var, ref expr) => {
+                expr.resolve(ctxt);
+                if ctxt.vars.contains_key(&var.name) {
+                    ctxt.add_error(DuplicateVariable(var.name.clone()));
+                } else {
+                    ctxt.vars.insert(var.name.clone(), var.ty);
+                }
+            },
+            &ExprStmt(ref e) => e.resolve(ctxt),
+            &ReturnStmt(ref e) => e.resolve(ctxt),
+            &AssignStmt(ref var_name, ref expr) => {
+                if !ctxt.vars.contains_key(var_name) {
+                    ctxt.add_error(UndefinedIdentifier(var_name.clone()));
+                }
+                expr.resolve(ctxt);
+            },
+            &IfStmt(ref cond, ref body, ref maybe_else) => {
+                cond.resolve(ctxt);
+                body.resolve(ctxt);
+                if let &Some(ref else_block) = maybe_else {
+                    else_block.resolve(ctxt);
+                }
+            },
+            &WhileStmt(ref cond, ref body) => {
+                cond.resolve(ctxt);
+                body.resolve(ctxt);
+            }
+        }
+    }
+
     fn check(&self, ctxt: &mut CheckCtxt, ret_type: Type) {
         match self {
             &DeclStmt(ref var, ref e) => {
@@ -475,6 +515,29 @@ impl Literal {
 }
 
 impl Expr {
+    fn resolve(&self, ctxt: &mut ResolveCtxt) {
+        match self {
+            &BinExpr(ref l, _, ref r) => {
+                l.resolve(ctxt);
+                r.resolve(ctxt);
+            },
+            &IdentExpr(ref name) => {
+                if !ctxt.vars.contains_key(name) {
+                    ctxt.add_error(UndefinedIdentifier(name.clone()));
+                }
+            },
+            &FuncCallExpr(ref name, ref args) => {
+                if !ctxt.funcs.contains_key(name) {
+                    ctxt.add_error(UndefinedIdentifier(name.clone()));
+                }
+                for arg in args {
+                    arg.resolve(ctxt);
+                }
+            },
+            &LitExpr(..) | &EmptyExpr => (),
+        }
+    }
+
     fn check(&self, ctxt: &mut CheckCtxt) -> Option<Type> {
         match self {
             &LitExpr(ref lit) => match lit {
