@@ -213,6 +213,9 @@ struct Function {
 
 impl Function {
     fn resolve(&self, ctxt: &mut ResolveCtxt) {
+        for var in self.decl.args.args.iter() {
+            ctxt.vars.insert(var.name.clone(), var.ty);
+        }
         self.block.resolve(ctxt);
     }
 
@@ -776,8 +779,7 @@ fn main() {
     let mut resolve_context = ResolveCtxt::new();
     ast.resolve(&mut resolve_context);
     if !resolve_context.errors.is_empty() {
-        println!("{:?}", resolve_context.errors);
-        return;
+        panic!("{:?}", resolve_context.errors);
     }
 
     let ResolveCtxt { vars, funcs, .. } = resolve_context;
@@ -785,8 +787,7 @@ fn main() {
     ast.check(&mut check_context);
 
     if !check_context.errors.is_empty() {
-        println!("{:?}", check_context.errors);
-        return;
+        panic!("{:?}", check_context.errors);
     }
 
     if config.output_type == OutputType::AST {
