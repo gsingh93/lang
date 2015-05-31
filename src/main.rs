@@ -235,6 +235,19 @@ impl Function {
 
         let basic_block = ctxt.context.append_basic_block(func, "entry");
         ctxt.builder.position_at_end(basic_block);
+
+        for var in self.decl.args.args.iter() {
+            let ty = var.ty.gen_type(ctxt);
+            let ptr_name = format!("{}.addr", var.name);
+            let ptr = ctxt.builder.build_alloca(ty, &ptr_name);
+            let arg = *ctxt.named_values.get(&var.name).unwrap();
+
+            // Replace `x` with the `x.addr` pointer
+            ctxt.named_values.insert(var.name.clone(), ptr);
+
+            ctxt.builder.build_store(arg, ptr);
+        }
+
         self.block.gen(ctxt);
 
         if self.decl.ty == Type::VoidTy {
