@@ -377,8 +377,6 @@ impl Stmt {
     fn check(&self, ctxt: &mut CheckCtxt, ret_type: Type) {
         match self {
             &DeclStmt(ref var, ref e) => {
-                ctxt.vars.insert(var.name.clone(), var.ty);
-
                 if let Some(res) = e.check(ctxt) {
                     if var.ty != res {
                         ctxt.add_error(TypeMismatch(var.ty, res));
